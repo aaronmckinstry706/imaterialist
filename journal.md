@@ -35,3 +35,34 @@ I need to get the current directory of a Python notebook. How do I do this? `os.
 Today, I wrote the script for downloading the images, basing it off of an existing script on Kaggle. I added a few more options and fine-tuned it to perform quickly on my computer. 
 
 Next weekend, the goal is to figure out how to get the image annotation text, instead of just the label ids. (See "It's actually a text competition!" post on Kaggle; that's why I think it may be important.)
+
+## Mar. 19, 2018
+
+I've decided it's worth the upload, because it downloads everything into directories so that it is useable for PyTorch. Aaaaaaaand I realized two things: (1) I can't upload a Kernel without running it (pretty terrible, really), and (2) it's probably not worth the effort. 
+
+From looking at [this](https://www.kaggle.com/iezepov/this-is-a-text-classification-competition) Kernel--specifically, the comments--I now know that using the URLs is not allowed in the competition. Good to know. 
+
+From looking at [this](https://www.kaggle.com/codename007/simple-exploration-notebook-furniture) Kernel, I've learned a few relevant things:
+
+* there are no missing URLs (even though, from my own experience, some URLs are dead);
+
+* the class distribution is relatively, though not exactly, even.
+
+From looking at [this](https://www.kaggle.com/andrewrib/visualizing-imaterialist-data) Kernel, I've learned some more things:
+
+* the image distribution is heavily skewed (the previous Kernel was misleading, because it grouped multiple categories into the same bin);
+
+* the functions below are cool;
+  ```
+  from IPython.core.display import HTML 
+  from ipywidgets import interact
+  from IPython.display import display
+  ```
+
+* the images are product images, which often feature the product front and center--even if they are in their natural environment. 
+
+Even though the categories are diverse, the *shapes* of the objects are quite similar. I wonder how they differ between categories? The next step in basic data exploration is to assign a name to each of the 128 features, and do some more data exploration myself. 
+
+Actually, the *easiest* thing to do is to get a pretrained PyTorch model and run that on the dataset. That's this weekend's goal. Meanwhile, I should look at shape detection literature. 
+
+Side note: the shape only gives you a hint. The context of the image will probably be important. 
