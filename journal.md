@@ -66,3 +66,35 @@ Even though the categories are diverse, the *shapes* of the objects are quite si
 Actually, the *easiest* thing to do is to get a pretrained PyTorch model and run that on the dataset. That's this weekend's goal. Meanwhile, I should look at shape detection literature. 
 
 Side note: the shape only gives you a hint. The context of the image will probably be important. 
+
+## Mar. 20, 2018
+
+Want to know the complexity of the data. How to measure complexity? Easy test: how simple of a model can you fit while getting good performance?
+
+* Logistic regression on progressive layers of Imagenet-trained model's outputs; how deep before performance is reasonable?
+
+* How well does t-SNE do in separating the images?
+
+* Is the center of the image always the product? Center crop vs. random crop. Maybe show with attention-based mechanism...but probably too complicated. Easier just to show effectiveness by taking severe center crop (like, only take the center X% of the least-magnitude dimension, where X varies from 10 to 100, and then train on those reduced images; alternatively, blurring the image beyond certain radius from center--but that's just a complicated version of the previous idea, so just take the center X%). Prediction: shrinking center crop will improve prediction in some classes, but it will reduce the ability to distinguish between similar shapes with different contexts. 
+
+* How much do you lose by switching to grayscale?
+
+* Try random shallow-convnet outputs with different models: random forests, linear/logistic regression, SVM. Can they do well?
+
+* Shape of objects seems like a really good indicator. Can you strip everything else--i.e., take only the edges of objects from an image--and still get good results?
+
+--Need background of image, too, for more ambiguous stuff (cup or waterbottle? First has kitchen background, second has camping background). How much do you need this? Can you do well with *just* the background image--i.e., *remove* the center of the image?
+
+Two interesting experiments from these thoughts: take center X% of center-cropped image and see performance, from X=10 to 100; then take *outer* X% of center crop and see performance, from X=10 to 100. 
+
+## Mar. 21, 2018
+
+I've decided that, this weekend, I want to put out a Kernel in which I perform the experiment above. In order to do this, I'll need a model that's easy to use and gets decent performance. To this end, I'll set up the framework--not for test submissions, but for training a model and evaluating on the validation data. To that end, tonight I'm going to choose the model, create the image transform, and get the linear outputs (that is, before logistic function is performed) from the model. 
+
+Model chosen: resnet34, because it gets good top-5 performance (~8% error, competitive with the best) while also being small enough to fit on my laptop's GPU. 
+
+The transform is done, and it was easy. 
+
+How do I get the "guts" of the function? Specifically, I'm trying to get the 2nd-to-last layer's output in resnet18. I can access the variables which refer to each layer. From this, I could build a class which uses each of the layer variables from a pretrained instance. However...this is just inheritance, but without calling it inheritance! I just need to subclass resnet18; in the constructor for the subclass, I will call my superclass's constructor with `pretrained=True`; in the `forward(self, x)` member function, I will construct everything as normal except that I will leave out the final fully-connected layer. This will give me the 2nd-to-last layer's output. Let's test this. 
+
+DAMNIT. `resnet18` is a *function*, not a *class*, so I can't inherit from `resnet18`--which means I can't inherit from a pretrained model. So it seems like my initial idea was the better option. However, I'm exhausted and I'll do that tomorrow. 
