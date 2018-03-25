@@ -47,13 +47,14 @@ class ResNetCopy(nn.Module):
         x = self.layer4(x)
         x = self.avgpool(x)
         if self.layer == ResNetCopy.AllowedLayers.PENULTIMATE:
-            x = self.fc(x.view(-1, 512))
+            return x
+        x = self.fc(x.view(-1, 512))
         return x
 
 
 def test_resnet34_output_same_as_output_of_copy():
     penult_resnet = ResNetCopy()
-    penult_resnet.layer = ResNetCopy.AllowedLayers.PENULTIMATE
+    penult_resnet.layer = ResNetCopy.AllowedLayers.ULTIMATE
     network_input = autograd.Variable(torch.rand(1, 3, 224, 224))
     my_output = penult_resnet(network_input).data.numpy()
     original_output = penult_resnet.resnet34(network_input).data.numpy()
