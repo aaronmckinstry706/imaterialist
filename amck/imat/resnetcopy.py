@@ -7,11 +7,12 @@ import torchvision.models as models
 import torch.nn as nn
 
 
-class ResNetCopy(nn.Module):
+class AllowedLayers(enum.Enum):
+    PENULTIMATE = 'penultimate'
+    ULTIMATE = 'utlimate'
 
-    class AllowedLayers(enum.Enum):
-        PENULTIMATE = 'penultimate'
-        ULTIMATE = 'utlimate'
+
+class ResNetCopy(nn.Module):
 
     def __init__(self):
         super().__init__()
@@ -27,7 +28,7 @@ class ResNetCopy(nn.Module):
         self.avgpool = resnet34.avgpool
         self.fc = resnet34.fc
         self.resnet34 = resnet34
-        self._layer = ResNetCopy.AllowedLayers.PENULTIMATE
+        self._layer = AllowedLayers.PENULTIMATE
 
     @property
     def layer(self):
@@ -35,7 +36,7 @@ class ResNetCopy(nn.Module):
 
     @layer.setter
     def layer(self, value: AllowedLayers):
-        if not isinstance(value, ResNetCopy.AllowedLayers):
+        if not isinstance(value, AllowedLayers):
             raise TypeError('ResNetCopy.layer must be an instance of AllowedLayers.')
         self._layer = value
 
@@ -46,7 +47,7 @@ class ResNetCopy(nn.Module):
         x = self.layer3(x)
         x = self.layer4(x)
         x = self.avgpool(x)
-        if self.layer == ResNetCopy.AllowedLayers.PENULTIMATE:
+        if self.layer == AllowedLayers.PENULTIMATE:
             return x
         x = self.fc(x.view(-1, 512))
         return x
@@ -54,7 +55,7 @@ class ResNetCopy(nn.Module):
 
 def test_resnet34_output_same_as_output_of_copy():
     penult_resnet = ResNetCopy()
-    penult_resnet.layer = ResNetCopy.AllowedLayers.ULTIMATE
+    penult_resnet.layer = AllowedLayers.ULTIMATE
     network_input = autograd.Variable(torch.rand(1, 3, 224, 224))
     my_output = penult_resnet(network_input).data.numpy()
     original_output = penult_resnet.resnet34(network_input).data.numpy()
