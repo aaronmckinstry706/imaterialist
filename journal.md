@@ -95,6 +95,36 @@ Model chosen: resnet34, because it gets good top-5 performance (~8% error, compe
 
 The transform is done, and it was easy. 
 
-How do I get the "guts" of the function? Specifically, I'm trying to get the 2nd-to-last layer's output in resnet18. I can access the variables which refer to each layer. From this, I could build a class which uses each of the layer variables from a pretrained instance. However...this is just inheritance, but without calling it inheritance! I just need to subclass resnet18; in the constructor for the subclass, I will call my superclass's constructor with `pretrained=True`; in the `forward(self, x)` member function, I will construct everything as normal except that I will leave out the final fully-connected layer. This will give me the 2nd-to-last layer's output. Let's test this. 
+How do I get the "guts" of the function? Specifically, I'm trying to get the 2nd-to-last layer's output in resnet34. I can access the variables which refer to each layer. From this, I could build a class which uses each of the layer variables from a pretrained instance. However...this is just inheritance, but without calling it inheritance! I just need to subclass resnet34; in the constructor for the subclass, I will call my superclass's constructor with `pretrained=True`; in the `forward(self, x)` member function, I will construct everything as normal except that I will leave out the final fully-connected layer. This will give me the 2nd-to-last layer's output. Let's test this. 
 
 DAMNIT. `resnet18` is a *function*, not a *class*, so I can't inherit from `resnet18`--which means I can't inherit from a pretrained model. So it seems like my initial idea was the better option. However, I'm exhausted and I'll do that tomorrow. 
+
+## Mar. 25, 2018
+
+Let's get our second-to-last layer output from resnet18. 
+
+The idea works! Use an actual instance of `ResNet` (`resnet18` or `resnet34`) and use its layers directly in my own class! I wrote the unit tests. 
+
+I learned that I can use the statement form `assert bool_expression, "wny it'd be false"` to include an error message in my assert statements. That is *hella* useful. 
+
+Inner functions only have *read* access to the enclosing scope! This makes it *way* easier to conceive of how closures would be implemented for the purposes of returning functions from functions. 
+
+Decorators are functions which return wrapped functions. That's all. We can use the `functools.wraps` decorator on the definition of the inner (i.e. wrapped) function in order to preserve the function name, docstring, and args (default and non-default); `wraps` even preserves the type annotations! Beautiful. 
+
+Use inner classes for encapsulation. More Python programmers should do this; it would have helped a lot. HOWEVER, if you're already encapsulating only one primary class per file then you should not use inner classes for helper classes which the user should access. 
+
+Use `@property`'s instead of regular variables for anything you intend to allow a user to set. 
+
+Enums are new in Python 3! Woohoo! Use enums; then, for checking whether the value is allowed in a setter, use a single type check on the enum class instead of checking whether the value is in a set. It's cheaper, and simpler!
+
+After that fun learning session, it's time to move on to the train/eval loop. I'd like to get tensorboard working, as well, so I can monitor the training progress of the network with cool visualizations. 
+
+Turns out that there are some version issues that I don't want to deal with. Let's try a more official installation sequence for tensorflow and tensorboard--maybe from the official TensorFlow website. Maybe that will solve any issues I have. 
+
+Nope! First, the wrong version of CUDA was installed--so I had to install TensorFlow v1.4.1 instead of the latest TensorFlow (because CUDA 9.0 caused problems for my GTX980M GPU). Then, once I had finished that, I found that it requires CUDNN; for 1.4.1, it requires CUDNN 6.0. That requires going to the NVIDIA website, downloading the files, and copying them into `/usr/local/cuda-8.0/include` or `.../cuda-8.0/lib64` as appropriate (file structure of archive indicates where files should go). After this, I got *another* error. I didn't even look at it. It's not worth installing TensorFlow; I've already spent 30 minutes attempting it. A different weekend, maybe. 
+
+Maybe. 
+
+If I can't do that, then the next step is to write the training loop. 
+
+Finished writing the training loop. Also figured out how to simplify implementation of resnet copy with different last layer. Gonna run it through tonight. At 1500 iterations, we have a full epoch through the dataset. The resnet paper (original mentions taking 64k iterations with a batch size of 128, which makes 8 million (approximately) images--which is 8 times the size of the labelled portion of ImageNet. Since our dataset is smaller, we can go through 8 epochs of our own dataset, or 192000*8/128 or approximately 12000 iterations. That should be plenty. Here's to hoping. 
