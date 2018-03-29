@@ -128,3 +128,34 @@ Maybe.
 If I can't do that, then the next step is to write the training loop. 
 
 Finished writing the training loop. Also figured out how to simplify implementation of resnet copy with different last layer. Gonna run it through tonight. At 1500 iterations, we have a full epoch through the dataset. The resnet paper (original mentions taking 64k iterations with a batch size of 128, which makes 8 million (approximately) images--which is 8 times the size of the labelled portion of ImageNet. Since our dataset is smaller, we can go through 8 epochs of our own dataset, or 192000*8/128 or approximately 12000 iterations. That should be plenty. Here's to hoping. 
+
+## Mar. 27, 2018
+
+I tried finetuning imagenet. After awhile, I found that the loss was super noisy and plateaued around 0.7-1.0. That was with Adam (batch size of 128), though, rather than with SGD (dividing by 10 when reaching a plateau, max of 64k iterations with batch size of 256)--which was the original method. 
+
+Training a model from scratch (again with Adam) did not work well at all; the loss didn't go down nearly as quickly as the finetuned model. 
+
+Training a model from scratch with SGD (as in the original paper) did not work well. The loss initially *increased* due to instability in the training. Not sure what the source of it was. 
+
+To figure out what it was, I tried step #0 of [this](https://blog.slavv.com/37-reasons-why-your-neural-network-is-not-working-4020854bd607?gi=279f1037a5a3) guide for debugging neural network training--that is, I reduced the number of training examples to 500 and retrained. It didn't overfit quickly, which is concerning. Is the data just really hard to learn? I verified that the images were, in fact, legitimate. 
+
+I tried going back to using Adam, but even that didn't work well. Maybe using Adam with 0.001 instead of 0.0001 learning rate? I.e., maybe the learning rate was too small?
+
+Turns out that `shuffle=True` in the `DataLoader` constructor causes the training data to be reshuffled on *every epoch*. It's cool, but it also means I can't shuffle once and then train on the first few entries in that subset. 
+
+The solution is to take away the `--no-shuffle` option. That way, we shuffle every time, but we can use the `RandomSubsetSampler` as the sampler if we need to restrict the training data. Tada!
+
+Increasing the size of the training data to just 8100 prevents the model from converging quickly. Let's try smaller sizes. $2^7 * 8 = 1024$, so let's try `--training-subset 1000` with `--batch-size 128`. Even a training set as small as 1024 doesn't converge quickly! Let's try even smaller, with 512--so with `--training-subset 500`. 
+
+Fun fact: I wasn't actually using the `lr_scheduler.ReduceLROnPlateau` object at all. I have to call `step(loss)` on it after every epoch, where `loss` is the validation loss. So that's cool. That's probably why `Adam` was working when `SGD` was not working. Also, I discovered that the `Adam` optimizer has a default learning rate of `0.001`, which is different than the `0.0001` that I thought it was. 
+
+Increasing the initial learning rate to 0.1 for `Adam` did the trick! Now it converges with 128, 256, and 512 examples! Let's go back up to 1024 and see what's up. BUT BEFORE THAT we need to discuss the loss of a uniform distribution over the categories. That loss is approximately 1/128. The cross entropy loss for classification evaluates to `E[-log(p_hat)]`, where `p_hat` is the probability assigned to the correct class by the model, and where the expectation is over the training examples. Thus, if the model assigns 1/128 to each class, then we would see `-log(1/128)`, or about 2.1 loss. OKAY. Now we can continue. 
+
+While that model's running, let's go over some notes about what we've seen so far. 
+* Increasing the number of examples also increases the time it takes to fit those examples. E.g., it took about 150 iterations to converge for 128 examples. For 256 examples, it took about 300-400. For 512 examples, it took about 1000. For 1024 examples, we will see how long it takes. 
+* Increasing the number of examples also increases the initial instability in the batch training loss. The length of this period of instability initially increases with the number of examples , due to the batch gradient not being the same as the gradient of the true loss. (However, I predict that, past some large-enough number of examples, the length of this initial period of instability should remain constant.)
+* Increasing the number of examples increases variance in the batch training loss throughout training. 
+
+Lesson learned: FOLLOW THE GUIDE. Choose an existing model, overfit on `batch_size` number of images. Use this overfitting to debug your network: increase your initial learning rate until just before it starts diverging, display the images you're training on to make sure your program is generating images correctly (are they actually images, and not just blank? In the small batch size, is your iterator iterating correctly?). 
+
+Back to the training! It finished. It converged to around 0.1-0.2 loss after about 2500-3000 iterations. Awesome! The next thing to do is calculate a per-channel mean and standard deviation. I need to use multiprocessing to do it, because otherwise it will be *slow as hell*. 
