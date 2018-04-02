@@ -49,9 +49,6 @@ def channel_sum_of_squares_and_size(batch: torch.FloatTensor, means: torch.Float
 
 
 def means_and_stdev_per_channel(dataloader: data.DataLoader):
-    """Takes a dataset of tuples `(image, ...)`, where `image` is a float tensor with dimensions k-by-m-by-n and the
-    elipses can be anything. It returns the per-channel standard deviation."""
-
     channel_means = mean_per_channel(dataloader)
 
     channel_sums_of_squares = torch.zeros(3)
@@ -81,7 +78,9 @@ if __name__ == '__main__':
     test_means_and_stdev_per_channel()
 
     dataloader = data.DataLoader(
-        datasets.ImageFolder('data/validation', transform=transforms.ToTensor()),
+        datasets.ImageFolder(
+            'data/training',
+            transform=transforms.ToTensor()),
         num_workers=8,
         batch_size=1)
     print(means_and_stdev_per_channel(dataloader))

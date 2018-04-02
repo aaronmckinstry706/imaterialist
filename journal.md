@@ -159,3 +159,22 @@ While that model's running, let's go over some notes about what we've seen so fa
 Lesson learned: FOLLOW THE GUIDE. Choose an existing model, overfit on `batch_size` number of images. Use this overfitting to debug your network: increase your initial learning rate until just before it starts diverging, display the images you're training on to make sure your program is generating images correctly (are they actually images, and not just blank? In the small batch size, is your iterator iterating correctly?). 
 
 Back to the training! It finished. It converged to around 0.1-0.2 loss after about 2500-3000 iterations. Awesome! The next thing to do is calculate a per-channel mean and standard deviation. I need to use multiprocessing to do it, because otherwise it will be *slow as hell*. 
+
+## Apr. 1, 2017
+
+I need to get the channel-wise mean and channel-wise pixel quantity for each image. To get it for a single image, I have a function `channel_sum_and_size(image)`. That works just fine. The problem is adding multiprocessing into the mix. I need to limit the number of jobs I can finish at one time. 
+
+Aaaaaaand (hours later, late at night) I'm done! Here are the results, for posterity:
+
+```
+mean = [0.6837, 0.6461, 0.6158]
+stdev = [0.2970, 0.3102, 0.3271]
+```
+
+OH MY GOD THAT TOOK FOREVER. I am so done with that. UGH. 
+
+Now we insert the normalization as part of the transform in our original code. 
+
+Interestingly, the convergence rate did not change significantly. At about 3000 iterations, the training starts to diverge. 
+
+The next thing to do is set up the training as normal: complete an epoch over the training data, and then compute the validation set loss, with the learning rate decreasing whenever the validation loss does not decrease. 

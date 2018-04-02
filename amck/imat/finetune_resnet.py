@@ -97,19 +97,10 @@ image_transform = transforms.Compose([
     transforms.Resize(224),
     transforms.CenterCrop(224),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    transforms.Normalize(mean=[0.6837, 0.6461, 0.6158], std=[0.2970, 0.3102, 0.3271])
 ])
 
-training_data = datasets.ImageFolder('data/training', transform=transforms.ToTensor())
-means = torch.FloatTensor([0, 0, 0])
-num_samples = [0, 0, 0]
-for (image, label) in training_data:
-    for i in range(len(num_samples)):
-        num_samples[i] += image.shape[1]*image.shape[2]
-        means += torch.sum(torch.sum(image, 2), 1)
-means = means/torch.FloatTensor(num_samples)
-print(means)
-exit(0)
+training_data = datasets.ImageFolder('data/training', transform=image_transform)
 
 resnet: models.ResNet = models.resnet18(pretrained=parsed_args.pretrained)
 resnet.fc = nn.Linear(512, 128)
