@@ -47,6 +47,7 @@ arg_parser.add_argument('--training-subset', '-t', type=int, default=sys.maxsize
                                                                                        'TRAINING_SUBSET number of '
                                                                                        'samples should be used as '
                                                                                        'data. (This is for debugging.)')
+arg_parser.add_argument('--learning-rate', '-r', type=float, default=0.001, help='Initial learning rate.')
 parsed_args = arg_parser.parse_args()
 
 command_queue = queue.Queue()
@@ -105,7 +106,7 @@ training_data = datasets.ImageFolder('data/training', transform=image_transform)
 resnet: models.ResNet = models.resnet18(pretrained=parsed_args.pretrained)
 resnet.fc = nn.Linear(512, 128)
 resnet.cuda()
-optimizer = optim.Adam(resnet.fc.parameters(), lr=0.01, weight_decay=0.0001)
+optimizer = optim.Adam(resnet.fc.parameters(), lr=parsed_args.learning_rate, weight_decay=0.0001)
 
 command_thread = threading.Thread(target=command_listener)
 command_thread.daemon = True

@@ -178,3 +178,24 @@ Now we insert the normalization as part of the transform in our original code.
 Interestingly, the convergence rate did not change significantly. At about 3000 iterations, the training starts to diverge. 
 
 The next thing to do is set up the training as normal: complete an epoch over the training data, and then compute the validation set loss, with the learning rate decreasing whenever the validation loss does not decrease. 
+
+Before-bed note: learning rate maximum seems to be 0.01 before it diverges. 
+
+## Apr. 7, 2018
+
+On my earlier project, the regular `Adam` optimizer implementation was at least 10x slower than in Tensorflow. Maybe if I use the `SparseAdam` optimizer then it will converge more quickly. Let's try that. 
+
+`SparseAdam` apparently only works for sparse tensors (I guess there is a specific datatype which is different from a regular tensor). 
+
+I tried optimizing a pretrained network with Adam, learning rate 0.01, on 1024 samples; it converged very quickly to ~0.05 training error (about 400 steps). I tried optimizing the same thing on 2048 samples and 4096 samples; in both cases, it converged quickly. However, when moving to 2^13 samples with the same setup, I had to decrease the learning rate to 0.001. It slowly converged (0.1 - 0.2 training error after 3000 iterations), but it converged nonetheless. 
+
+After doing all of that, I found the paper ["The Marginal Value of Adaptive Gradient Methods in Machine Learning"](https://papers.nips.cc/paper/7003-the-marginal-value-of-adaptive-gradient-methods-in-machine-learning.pdf) from NIPS 2017, which suggests two things:
+
+* use SGD instead of Adam, and use validation-based decay (i.e., evaluate on validation set after every epoch; when current validation error is not the minimum so far, decrease the learning rate by constant factor);
+
+* if you use Adam, decay the learning rate (probably using validation-based decay). 
+
+This provides a clear path forward, at least. What I now need to do is implement the training loop and validation loop separately. Here are some relevant implementation details:
+
+* make sure to take the average error over the *whole* validation set, rather than the average of batch errors on the validation set;
+* one method for training, the other for validating. 
