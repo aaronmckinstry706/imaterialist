@@ -199,3 +199,25 @@ This provides a clear path forward, at least. What I now need to do is implement
 
 * make sure to take the average error over the *whole* validation set, rather than the average of batch errors on the validation set;
 * one method for training, the other for validating. 
+
+Implemented the single-epoch training function. 
+
+## Apr. 8, 2018
+
+Now I need to implement the validation function. It should take the data, the network, and a loss function. The loss function must sum, not average, the losses in a batch. 
+
+I made the validation function. Also fixed both train and validate functions to use cuda as an option. 
+
+I have made progress since the previous paragraph was written:
+
+* I rewrote the main script in order to use the `train` and `validate` functions;
+
+* I made the `Stopwatch` class instances into context managers for more convenient and sensible syntax;
+
+* I organized my code into three threads--the training thread, the command thread, and the main thread--and set the training thread as a daemon and make the main thread perform a join with the command thread (this makes it so that, if the command thread exits because I type in `exit`, then the main thread will finish its join and stop, causing the training thread to stop instantly (since it's a daemon));
+
+* after making sure the code worked properly, I tested the code on three learning rates: 0.1, 0.01, and 0.001. The learning rate 0.01 was the best among them, so I will start with that and use the `ReduceLROnPlateau` learning rate scheduler, stepping after each epoch and passing the validation loss. 
+
+Two things yet to do before I run the experiment: find the optimal patience value to use for `ReduceLROnPlateau`, and only save the model corresponding to the best validation score (at least, I think that's the thing to do). Let's check that last paper, ["The Marginal Value of Adaptive Gradient Methods in Machine Learning"](https://papers.nips.cc/paper/7003-the-marginal-value-of-adaptive-gradient-methods-in-machine-learning.pdf), that we dug up. 
+
+Looking at the paper, the "dev-decay" method is what they claim is best, and it has a patience of 1, so we'll use a patience of 1 as well. Now let's add the method for saving the model with the best validation error. 

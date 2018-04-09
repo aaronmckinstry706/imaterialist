@@ -7,6 +7,9 @@ class Stopwatch:
     A class that operates a stopwatch. Basic functions include start(), stop(), lap(),
     and get_lap_times(). All returned times are in seconds. The accuracy of the stopwatch
     is the accuracy of the time.perf_counter() command.
+
+    This class is also a context manager. When the `with` context is entered, the stopwatch is started. When the context
+    is exited, the stopwatch is stopped.
     """
 
     def __init__(self):
@@ -40,6 +43,14 @@ class Stopwatch:
         self._is_stopped = True
         self._current_lap_time = 0
         self._lap_times = []
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, *args):
+        self.stop()
+        return self
 
 
 def run_stopwatch():
