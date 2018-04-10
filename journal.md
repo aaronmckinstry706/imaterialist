@@ -221,3 +221,27 @@ I have made progress since the previous paragraph was written:
 Two things yet to do before I run the experiment: find the optimal patience value to use for `ReduceLROnPlateau`, and only save the model corresponding to the best validation score (at least, I think that's the thing to do). Let's check that last paper, ["The Marginal Value of Adaptive Gradient Methods in Machine Learning"](https://papers.nips.cc/paper/7003-the-marginal-value-of-adaptive-gradient-methods-in-machine-learning.pdf), that we dug up. 
 
 Looking at the paper, the "dev-decay" method is what they claim is best, and it has a patience of 1, so we'll use a patience of 1 as well. Now let's add the method for saving the model with the best validation error. 
+
+## Apr. 9, 2018
+
+I trained the model for 19 epochs, with an initial learning rate of 0.01 and using the dev-decay method with a patience of 1; the training error seemed to plateau at about 0.85, regardless of how much the learning rate was reduced, and the best validation error was at just under 1.1. From this attempt, a few things are clear:
+
+* the model is not high-capacity enough to overfit the training set, which is usually required for the network to fit will;
+
+* given that this model was large enough to fit Imagenet fairly well, it seems clear that the goal function itself (i.e., the combination of data and labels) is very difficult to learn. 
+
+Before I move on, I should note some additional important points. 
+
+* I used momentum of 0.9 in my SGD. In that paper I mentioned yesterday, pure SGD performed better than SGD with momentum. 
+
+* When using `ReduceLROnPlateau`, I was checking whether the *validation loss* was plateauing, rather than the *validation accuracy*. This is an important distinction, and it might affect the final accuracy of the model (the issues regarding loss, mentioned above, are not related). 
+
+The next thing to do (this weekend):
+
+* add a command line option for loading a (resnet) model from a file;
+
+* write a function for evaluating a model's *accuracy*, instead of the model's *loss*;
+
+* evaluate the saved model's accuracy on the training and validation set to get a sense of how the loss is corresponding to the accuracy (since the problem is so difficult, a higher loss may be acceptable in that it still yields near-100% accuracy);
+
+* qualitatively explore the mistakes the model is making (what classes are correlated? Does it *make sense* that they would be correlated, or is it completely abnormal? I predict that it will make sense, but I must exercise due diligence in these matters and investigate properly). 
