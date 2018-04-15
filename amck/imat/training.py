@@ -1,4 +1,7 @@
 import functools
+import logging
+import math
+import sys
 import typing
 
 
@@ -8,6 +11,14 @@ import torch.nn as nn
 import torch.nn.functional as functional
 import torch.optim as optim
 import torch.utils.data as data
+
+
+LOGGING_LEVEL = logging.DEBUG
+LOGGER = logging.getLogger(__name__)
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setLevel(LOGGING_LEVEL)
+LOGGER.addHandler(stream_handler)
+LOGGER.setLevel(LOGGING_LEVEL)
 
 
 def train(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],
@@ -42,7 +53,7 @@ def train(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTen
     return loss_history
 
 
-def test_train():
+def test_train(cuda=False):
     class SimpleLinear(nn.Module):
         def __init__(self):
             super().__init__()
@@ -52,43 +63,23 @@ def test_train():
             return self.fc(x)
 
     network = SimpleLinear()
+    if cuda:
+        network.cuda()
     optimizer = optim.SGD(network.parameters(), lr=0.1)
     loss_function = functional.cross_entropy
     dataset = data.TensorDataset(torch.rand(200, 3), (torch.rand(200)*3).long())
     dataloader = data.DataLoader(dataset, batch_size=3, num_workers=1)
-    loss_history = train(dataloader, network, optimizer, loss_function)
+    loss_history = train(dataloader, network, optimizer, loss_function, cuda=cuda)
     assert isinstance(loss_history, list)
     assert len(loss_history) == 67
     for loss in loss_history:
         assert isinstance(loss, float)
 
 
-def test_train_cuda():
-    class SimpleLinear(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.fc = nn.Linear(3, 3)
-
-        def forward(self, x):
-            return self.fc(x)
-
-    network = SimpleLinear()
-    network.cuda()
-    optimizer = optim.SGD(network.parameters(), lr=0.1)
-    loss_function = functional.cross_entropy
-    dataset = data.TensorDataset(torch.rand(200, 3), (torch.rand(200)*3).long())
-    dataloader = data.DataLoader(dataset, batch_size=3, num_workers=1)
-    loss_history = train(dataloader, network, optimizer, loss_function, cuda=True)
-    assert isinstance(loss_history, list)
-    assert len(loss_history) == 67
-    for loss in loss_history:
-        assert isinstance(loss, float)
-
-
-def validate(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],
-             network: nn.Module,
-             loss_function: typing.Callable[[autograd.Variable, autograd.Variable], autograd.Variable],
-             cuda=False):
+def evaluate_loss(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],
+                  network: nn.Module,
+                  loss_function: typing.Callable[[autograd.Variable, autograd.Variable], autograd.Variable],
+                  cuda=False):
     """
     Computes the network's average loss over the entire dataset. Note that the loss function must *sum* over each
     batch, rather than *average* over each batch.
@@ -113,7 +104,7 @@ def validate(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.Long
     return (loss / total_samples)[0]
 
 
-def test_validate():
+def test_evaluate_loss(cuda=False):
     class SimpleLinear(nn.Module):
         def __init__(self):
             super().__init__()
@@ -123,31 +114,108 @@ def test_validate():
             return self.fc(x)
 
     network = SimpleLinear()
+    if cuda:
+        network.cuda()
     loss_function = functools.partial(functional.cross_entropy, size_average=False)
     dataset = data.TensorDataset(torch.rand(200, 3), (torch.rand(200)*3).long())
     dataloader = data.DataLoader(dataset, batch_size=3, num_workers=1)
-    assert isinstance(validate(dataloader, network, loss_function), float)
+    assert isinstance(evaluate_loss(dataloader, network, loss_function, cuda=cuda), float)
 
 
-def test_validate_cuda():
+def evaluate_accuracy(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],
+                      network: nn.Module,
+                      cuda=False):
+    network.eval()
+    total_num_correct = 0
+    total_samples = 0
+    for i, (images, labels) in enumerate(dataset):
+
+        images = autograd.Variable(images)
+        labels = autograd.Variable(labels)
+        if cuda:
+            images = images.cuda()
+            labels = labels.cuda()
+        _, predicted_indices = torch.max(network(images).data, 1)
+        total_num_correct += torch.sum(torch.eq(predicted_indices, labels.data))
+        total_samples += len(images)
+    return total_num_correct/total_samples
+
+
+def test_evaluate_accuracy(cuda=False):
     class SimpleLinear(nn.Module):
         def __init__(self):
             super().__init__()
             self.fc = nn.Linear(3, 3)
+            self.fc.weight.data.fill_(0)
+            self.fc.bias.data = torch.FloatTensor([1, 0, 0])
 
         def forward(self, x):
             return self.fc(x)
 
     network = SimpleLinear()
-    network.cuda()
+    if cuda:
+        network.cuda()
+    dataset = data.TensorDataset(torch.rand(12, 3), torch.LongTensor([0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2]))
+    dataloader = data.DataLoader(dataset, batch_size=4, shuffle=True, num_workers=1)
+    accuracy = evaluate_accuracy(dataloader, network, cuda=cuda)
+    assert isinstance(accuracy, float) and accuracy == 0.5
+
+
+def evaluate_loss_and_accuracy(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],
+                               network: nn.Module,
+                               loss_function: typing.Callable[[autograd.Variable, autograd.Variable], autograd.Variable],
+                               cuda=False):
+    network.eval()
+    loss = torch.zeros(1).float()
+    total_num_correct = 0
+    total_samples = 0
+    for i, (images, labels) in enumerate(dataset):
+        images = autograd.Variable(images)
+        labels = autograd.Variable(labels)
+        if cuda:
+            images = images.cuda()
+            labels = labels.cuda()
+        network_output = network(images)
+        loss += loss_function(network_output, labels).data[0]
+        _, predicted_indices = torch.max(network_output.data, 1)
+        total_num_correct += torch.sum(torch.eq(predicted_indices, labels.data))
+        total_samples += len(images)
+    return (loss / total_samples)[0], total_num_correct/total_samples
+
+
+def test_evaluate_loss_and_accuracy(cuda=False):
+    class SimpleLinear(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = nn.Linear(3, 3)
+            self.fc.weight.data.fill_(0)
+            self.fc.bias.data = torch.FloatTensor([math.log(0.5), math.log(0.25), math.log(0.25)])
+
+        def forward(self, x):
+            return self.fc(x)
+
+    network = SimpleLinear()
+    if cuda:
+        network.cuda()
+    dataset = data.TensorDataset(torch.rand(12, 3), torch.LongTensor([0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2]))
+    dataloader = data.DataLoader(dataset, batch_size=4, shuffle=True, num_workers=1)
     loss_function = functools.partial(functional.cross_entropy, size_average=False)
-    dataset = data.TensorDataset(torch.rand(200, 3), (torch.rand(200)*3).long())
-    dataloader = data.DataLoader(dataset, batch_size=3, num_workers=1)
-    assert isinstance(validate(dataloader, network, loss_function, cuda=True), float)
+    loss, accuracy = evaluate_loss_and_accuracy(dataloader, network, loss_function, cuda=cuda)
+
+    loss_values_by_label = -1.0 * torch.log(torch.FloatTensor([0.5, 0.25, 0.25]))
+    expected_sample_losses = torch.FloatTensor([loss_values_by_label[0]]*6 + [loss_values_by_label[1]]*6)
+    expected_loss = torch.sum(expected_sample_losses)/len(expected_sample_losses)
+
+    assert isinstance(loss, float) and loss == expected_loss
+    assert isinstance(accuracy, float) and accuracy == 0.5
 
 
 if __name__ == '__main__':
     test_train()
-    test_train_cuda()
-    test_validate()
-    test_validate_cuda()
+    test_train(cuda=True)
+    test_evaluate_loss()
+    test_evaluate_loss(cuda=True)
+    test_evaluate_accuracy()
+    test_evaluate_accuracy(cuda=True)
+    test_evaluate_loss_and_accuracy()
+    test_evaluate_loss_and_accuracy(cuda=True)
