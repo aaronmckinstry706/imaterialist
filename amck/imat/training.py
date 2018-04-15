@@ -38,19 +38,24 @@ def train(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTen
     """
     network.train()
     loss_history = []
+    accuracy_history = []
     for i, (images, labels) in enumerate(dataset):
         images = autograd.Variable(images)
         labels = autograd.Variable(labels)
         if cuda:
             images = images.cuda()
             labels = labels.cuda()
-        loss = loss_function(network(images), labels)
+        network_output = network(images)
+        _, predicted_indices = torch.max(network_output.data, 1)
+        accuracy = torch.sum(torch.eq(predicted_indices, labels.data))/float(len(images.data))
+        accuracy_history.append(accuracy)
+        loss = loss_function(network_output, labels)
         loss_history.append(loss.data[0])
         network.zero_grad()
         loss.backward()
         optimizer.step()
 
-    return loss_history
+    return loss_history, accuracy_history
 
 
 def test_train(cuda=False):
@@ -69,11 +74,17 @@ def test_train(cuda=False):
     loss_function = functional.cross_entropy
     dataset = data.TensorDataset(torch.rand(200, 3), (torch.rand(200)*3).long())
     dataloader = data.DataLoader(dataset, batch_size=3, num_workers=1)
-    loss_history = train(dataloader, network, optimizer, loss_function, cuda=cuda)
+    loss_history, accuracy_history = train(dataloader, network, optimizer, loss_function, cuda=cuda)
+
     assert isinstance(loss_history, list)
     assert len(loss_history) == 67
     for loss in loss_history:
-        assert isinstance(loss, float)
+        assert isinstance(loss, float) and loss >= 0.0
+
+    assert isinstance(accuracy_history, list)
+    assert len(accuracy_history) == 67
+    for accuracy in accuracy_history:
+        assert isinstance(accuracy, float) and 0.0 <= accuracy <= 1.0
 
 
 def evaluate_loss(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],

@@ -245,3 +245,19 @@ The next thing to do (this weekend):
 * evaluate the saved model's accuracy on the training and validation set to get a sense of how the loss is corresponding to the accuracy (since the problem is so difficult, a higher loss may be acceptable in that it still yields near-100% accuracy);
 
 * qualitatively explore the mistakes the model is making (what classes are correlated? Does it *make sense* that they would be correlated, or is it completely abnormal? I predict that it will make sense, but I must exercise due diligence in these matters and investigate properly). 
+
+## Apr. 14, 2018
+
+I wrote and tested the accuracy calculation functions, and streamlined the testing code to reduce code duplication. 
+
+I integrated the new accuracy calculation functions into the main script, including sections involving training and validation, the script output, the metric tracking, and the step function for the `ReduceLROnPlateau` learning rate scheduler. 
+
+Next step is adding an evaluation mode. A related issue is saving the hyperparameters with the model. 
+
+I added an evaluation mode, and am ignoring how I save the hyperparameters. In doing that, I added the command line parameter allowing me to load a model from a file. I also evaluated the model's accuracy on the validation set: 0.67 validation accuracy, and 1.17 validation loss. On the one hand, these results seem abysmal in comparison to Imagenet or other image dataset accuracies and losses. On the other hand, this is a pretrained model, which means the following: since it did not do well, I have either (a) failed to optimize the hyperparameters well enough or (b) the problem is just *hard* to solve. The evidence supporting (b) is that, even though the validation loss is a high value of 1.17 (indicating that the probability of the validation predictions being entirely correct is e^-1.17, or approximately 0.31), the accuracy seems relatively high at nearly 70% (far, *far* better than 1/128 random-model performance). HOWEVER, I don't have good reference numbers to back this up. 
+
+[This post and the corresponding answers](https://stats.stackexchange.com/questions/258166/good-accuracy-despite-high-loss-value) suggest that the relationship between accuracy and loss is not necessarily inverse--but that's just two random guys on Stats Stack Exchange. 
+
+The next thing to do is implement saving of the metrics along with the model; additionally, I want a --name option in the CLI, and save all things relating to the model's run to the folder `models/--name`. This way, we don't have to worry about saving everything in one object. 
+
+Once I have this completed, I will rerun the training again and watch the accuracy *and* the loss to observe the behavior. 
