@@ -261,3 +261,18 @@ I added an evaluation mode, and am ignoring how I save the hyperparameters. In d
 The next thing to do is implement saving of the metrics along with the model; additionally, I want a --name option in the CLI, and save all things relating to the model's run to the folder `models/--name`. This way, we don't have to worry about saving everything in one object. 
 
 Once I have this completed, I will rerun the training again and watch the accuracy *and* the loss to observe the behavior. 
+
+I added the `models/--name` option, and saved all the hyperparameters I thought were relevant. 
+
+I'm re-running my first experiment. Changes from the first experiment, though:
+
+* I'm using no momentum term;
+
+* I'm stopping training entirely if the learning rate goes below 10^-8; and
+
+* the learning rate scheduler is stepping based on the validation accuracy, rather than the validation loss. 
+
+A thought about this whole project, from looking at a Kaggle Kernel today: the categories are unclear. There are no labels for them. Some of them are obvious enough (glasses out of which you drink, vs. cups out of which you drink, vs. pants), but others are not entirely clear. There may be some semantic issues with the labels--i.e., it's tough to generalize because you can't generalize well in the first place. 
+
+I wonder if attentional models would do better at paying attention to the details?
+

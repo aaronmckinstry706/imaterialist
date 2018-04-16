@@ -4,6 +4,7 @@ import datetime
 import functools
 import logging
 import multiprocessing
+import pathlib
 import random
 import sys
 import threading
@@ -40,14 +41,18 @@ metrics = collections.defaultdict(list)
 
 def metrics_plotter():
     def plot_metrics(clargs):
-        pyplot.figure()
+        f = pyplot.figure()
+        f.suptitle('Training Metrics')
 
         for p, (name, vals) in enumerate(metrics.items()):
             if len(vals) > 1:
-                pyplot.subplot(len(metrics), 2, 2 * p + 1)
-                pyplot.plot(vals)
-                pyplot.subplot(len(metrics), 2, 2 * p + 2)
-                pyplot.plot(vals[-clargs.short_history:])
+                ax = pyplot.subplot(len(metrics), 2, 2 * p + 1)
+                ax.plot(vals)
+                ax.set_title(name)
+
+                ax = pyplot.subplot(len(metrics), 2, 2 * p + 2)
+                ax.plot(vals[-clargs.short_history:])
+                ax.set_title(name)
 
         if len(metrics) > 0:
             pyplot.show(block=True)
@@ -65,7 +70,16 @@ def command_listener(clargs):
 
 
 def train(clargs):
-    START_TIME_STR = str(datetime.datetime.now()).replace(' ', '_')
+    save_path = pathlib.Path(clargs.save_path)
+    save_path.resolve()
+    save_path = save_path.absolute()
+    save_path.mkdir(parents=True, exist_ok=True)
+    model_path = save_path / 'model'
+    hyperparameters_path = save_path / 'hyperparameters'
+    metrics_path = save_path / 'metrics'
+
+    hyperparameters = dict()
+    hyperparameters['clargs'] = vars(clargs)
 
     if clargs.pretrained:
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # From Imagenet.
@@ -96,11 +110,14 @@ def train(clargs):
     resnet.fc = nn.Linear(512, 128)
     resnet.cuda()
 
-    optimizer = optim.SGD(resnet.fc.parameters(), lr=clargs.learning_rate, weight_decay=0.0001, momentum=0.9)
+    optimizer = optim.SGD(resnet.fc.parameters(), lr=clargs.learning_rate, weight_decay=0.0001)
+    hyperparameters['optimizer'] = optimizer.state_dict()
     scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, patience=1, verbose=True)
 
     training_loss_function = functional.cross_entropy
     validation_loss_function = functools.partial(functional.cross_entropy, size_average=False)
+
+    torch.save(hyperparameters, str(hyperparameters_path))
 
     validation_stopwatch = stopwatch.Stopwatch()
     training_stopwatch = stopwatch.Stopwatch()
@@ -108,6 +125,9 @@ def train(clargs):
     best_validation_accuracy = -1.0
     with stopwatch.Stopwatch() as total_time_stopwatch, stopwatch.Stopwatch() as epoch_stopwatch:
         for i in range(clargs.epoch_limit):
+            if scheduler.in_cooldown:
+                metrics['learning_rate_drop_epoch'].append(i)
+
             LOGGER.debug('Training...')
 
             with training_stopwatch:
@@ -131,8 +151,10 @@ def train(clargs):
 
             if validation_accuracy > best_validation_accuracy:
                 best_validation_accuracy = validation_accuracy
-                torch.save(resnet, 'models/finetuned_resnet_{}'.format(START_TIME_STR))
+                torch.save(resnet, str(model_path))
                 saving_stopwatch.lap()
+
+            torch.save(metrics, metrics_path)
 
             epoch_stopwatch.lap()
 
@@ -190,7 +212,7 @@ def evaluate(clargs):
                 .format(validation_loss, validation_accuracy))
 
 
-def main():
+def get_args():
     arg_parser = argparse.ArgumentParser(
         description='Trains Resnet-18 from the PyTorch models on the iMaterialist training data, and evaluates trained '
                     'resnet models on iMaterialist validation data.')
@@ -198,7 +220,7 @@ def main():
         '--verbose', '-v', action='count', default=0,
         help='Indicate the level of verbosity. Include once to get info logs and twice to include debug-level logs.')
     arg_parser.add_argument('--num-workers', '-w', type=int, default=8,
-                                         help='Number of processes concurrently loading images from the training dataset.')
+                            help='Number of processes concurrently loading images from the training dataset.')
     arg_parser.add_argument('--batch-size', '-b', type=int, default=128, help='Batch size.')
 
     subparsers = arg_parser.add_subparsers(dest='subparser_name')
@@ -212,20 +234,58 @@ def main():
     train_subcommand_parser.add_argument('--pretrained', '-p', action='store_true', default=False,
                                          help='Indicates that the model should be pretrained on ImageNet.')
     train_subcommand_parser.add_argument('--training-subset', '-t', type=int, default=sys.maxsize,
-                                         help='Indicates that only TRAINING_SUBSET number of samples should be used for training data.')
+                                         help='Indicates that only TRAINING_SUBSET number of samples should be used for'
+                                              ' training data.')
     train_subcommand_parser.add_argument('--learning-rate', '-r', type=float, default=0.001,
                                          help='Initial learning rate.')
+    train_subcommand_parser.add_argument('--save-path', '-n', default=str(datetime.datetime.now()).replace(' ', '_'),
+                                         help='The directory path under which to save all model results during '
+                                              'training.')
     train_subcommand_parser.set_defaults(train=True)
 
     evaluate_subcommand_parser = subparsers.add_parser(
         'evaluate', help='Evaluates a given Resnet-18 model on the iMaterialist validation data.')
     evaluate_subcommand_parser.add_argument('--normalization', '-n', default='imaterialist',
                                             help='Normalization to use for evaluation.')
-    evaluate_subcommand_parser.add_argument('resnet_model', help='The file location for the Resnet-18 model to be '
+    evaluate_subcommand_parser.add_argument('model_directory', help='The model directory for the Resnet-18 model to be '
                                                                  'evaluated.')
     evaluate_subcommand_parser.set_defaults(evaluate=True)
 
     parsed_args = arg_parser.parse_args()
+
+    # Check additional restrictions on values and types.
+
+    if parsed_args.num_workers < 1:
+        arg_parser.error("--num-workers must be positive.")
+    if parsed_args.batch_size < 1:
+        arg_parser.error("--batch-size must be positive.")
+
+    if parsed_args.train:
+        if parsed_args.epoch_limit < 1:
+            arg_parser.error("--epoch-limit must be positive.")
+        if parsed_args.short_history < 2:
+            arg_parser.error("--short-history must be at least 2.")
+        if parsed_args.training_subset < 1:
+            arg_parser.error("--training-subset must be positive.")
+        if parsed_args.learning_rate <= 0.0:
+            arg_parser.error("--learning-rate must be positive.")
+        save_path = pathlib.Path(parsed_args.save_path)
+        if save_path.exists():
+            arg_parser.error("--save-path must not already exist.")
+
+    elif parsed_args.evaluate:
+        load_path = pathlib.Path(parsed_args.model_directory)
+        if not load_path.exists():
+            arg_parser.error("model_directory must exist.")
+        elif not load_path.is_dir():
+            arg_parser.error("model_directory must be a directory.")
+
+    return parsed_args
+
+
+def main():
+
+    parsed_args = get_args()
 
     if parsed_args.verbose == 1:
         LOGGER.setLevel(logging.INFO)
