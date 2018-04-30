@@ -47,10 +47,10 @@ def train(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTen
             labels = labels.cuda()
         network_output = network(images)
         _, predicted_indices = torch.max(network_output.data, 1)
-        accuracy = torch.sum(torch.eq(predicted_indices, labels.data))/float(len(images.data))
+        accuracy = torch.sum(torch.eq(predicted_indices, labels.data)).item()/float(len(images.data))
         accuracy_history.append(accuracy)
         loss = loss_function(network_output, labels)
-        loss_history.append(loss.data[0])
+        loss_history.append(loss.item())
         network.zero_grad()
         loss.backward()
         optimizer.step()
@@ -84,7 +84,8 @@ def test_train(cuda=False):
     assert isinstance(accuracy_history, list)
     assert len(accuracy_history) == 67
     for accuracy in accuracy_history:
-        assert isinstance(accuracy, float) and 0.0 <= accuracy <= 1.0
+        assert isinstance(accuracy, float)
+        assert 0.0 <= accuracy <= 1.0
 
 
 def evaluate_loss(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],
@@ -102,17 +103,15 @@ def evaluate_loss(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch
     :return: The averaged loss over the whole dataset.
     """
     network.eval()
-    loss = torch.zeros(1).float()
+    loss = 0.0
     total_samples = 0
     for i, (images, labels) in enumerate(dataset):
-        images = autograd.Variable(images)
-        labels = autograd.Variable(labels)
         if cuda:
             images = images.cuda()
             labels = labels.cuda()
-        loss += loss_function(network(images), labels).data[0]
+        loss += loss_function(network(images), labels).item()
         total_samples += len(images)
-    return (loss / total_samples)[0]
+    return loss
 
 
 def test_evaluate_loss(cuda=False):
@@ -140,16 +139,13 @@ def evaluate_accuracy(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, t
     total_num_correct = 0
     total_samples = 0
     for i, (images, labels) in enumerate(dataset):
-
-        images = autograd.Variable(images)
-        labels = autograd.Variable(labels)
         if cuda:
             images = images.cuda()
             labels = labels.cuda()
         _, predicted_indices = torch.max(network(images).data, 1)
         total_num_correct += torch.sum(torch.eq(predicted_indices, labels.data))
         total_samples += len(images)
-    return total_num_correct/total_samples
+    return float(total_num_correct)/total_samples
 
 
 def test_evaluate_accuracy(cuda=False):
@@ -169,7 +165,8 @@ def test_evaluate_accuracy(cuda=False):
     dataset = data.TensorDataset(torch.rand(12, 3), torch.LongTensor([0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2]))
     dataloader = data.DataLoader(dataset, batch_size=4, shuffle=True, num_workers=1)
     accuracy = evaluate_accuracy(dataloader, network, cuda=cuda)
-    assert isinstance(accuracy, float) and accuracy == 0.5
+    assert isinstance(accuracy, float)
+    assert accuracy == 0.5
 
 
 def evaluate_loss_and_accuracy(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],
@@ -177,21 +174,19 @@ def evaluate_loss_and_accuracy(dataset: typing.Iterable[typing.Tuple[torch.Float
                                loss_function: typing.Callable[[autograd.Variable, autograd.Variable], autograd.Variable],
                                cuda=False):
     network.eval()
-    loss = torch.zeros(1).float()
+    loss = 0
     total_num_correct = 0
     total_samples = 0
     for i, (images, labels) in enumerate(dataset):
-        images = autograd.Variable(images)
-        labels = autograd.Variable(labels)
         if cuda:
             images = images.cuda()
             labels = labels.cuda()
         network_output = network(images)
-        loss += loss_function(network_output, labels).data[0]
+        loss += loss_function(network_output, labels).item()
         _, predicted_indices = torch.max(network_output.data, 1)
-        total_num_correct += torch.sum(torch.eq(predicted_indices, labels.data))
+        total_num_correct += torch.sum(torch.eq(predicted_indices, labels.data)).item()
         total_samples += len(images)
-    return (loss / total_samples)[0], total_num_correct/total_samples
+    return loss, total_num_correct/total_samples
 
 
 def test_evaluate_loss_and_accuracy(cuda=False):
@@ -215,10 +210,13 @@ def test_evaluate_loss_and_accuracy(cuda=False):
 
     loss_values_by_label = -1.0 * torch.log(torch.FloatTensor([0.5, 0.25, 0.25]))
     expected_sample_losses = torch.FloatTensor([loss_values_by_label[0]]*6 + [loss_values_by_label[1]]*6)
-    expected_loss = torch.sum(expected_sample_losses)/len(expected_sample_losses)
+    expected_loss = torch.sum(expected_sample_losses)
 
-    assert isinstance(loss, float) and loss == expected_loss
-    assert isinstance(accuracy, float) and accuracy == 0.5
+    assert isinstance(loss, float)
+    assert loss == expected_loss
+
+    assert isinstance(accuracy, float)
+    assert accuracy == 0.5
 
 
 if __name__ == '__main__':
