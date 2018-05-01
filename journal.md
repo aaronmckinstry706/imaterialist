@@ -276,3 +276,72 @@ A thought about this whole project, from looking at a Kaggle Kernel today: the c
 
 I wonder if attentional models would do better at paying attention to the details?
 
+## Apr. 20, 2018
+
+I couldn't train the model, because I had to do taxes, and I didn't have support for resuming from a pause in training. 
+
+I will start the training--however, I have an idea. The `resnet18` model is clearly not a good-enough architecture for this problem. Since the model bias is the largest factor in determining good performance, I think that a larger model will yield greater performance. To this end...
+
+* I will use the deeper `resnet34` model instead. 
+
+* This means my batch size will be cut in half. This also means I will need to perform another hyperparameter search. 
+
+* On a related note, the `ReduceLROnPlateau` learning rate scheduler will reduce the learning rate by a factor of 0.5. Compared to reducing by a factor of 0.1, this should help by keeping the learning rate as high as possible while also decreasing the learning rate significantly. 
+
+* This time, I won't have to worry about a potentially-bad momentum value, since I'm not using momentum; this is nice. 
+
+* I will perform my learning rate search starting with 1 and dividing by 2 for four iterations: 1, 0.5, 0.25, 0.125, and 0.0625. If any edge value gets the lowest loss, I will keep searching in that direction until the learning rate increases. For each attempted learning rate, the validation loss will be evaluated at the end of one epoch through the dataset; this is the loss for that learning rate. 
+
+Actually, I have a different learning rate search procedure; the goal of this procedure is to save time, since an entire epoch is expensive. I start at a high learning rate of 1.0 with just 1000 samples, and multiply by 0.5 as required until my training loss converges to near-0. Once I obtain this maximum learning rate, I immediately jump to training on the entire training set; however, instead of the maximum learning rate I obtained before, I use `(maximum learning rate) * (1000 / (size of training set))`. The rationale behind this is that, when multiplying the training set size by a factor `x`, it is equivalent to multiplying the batch size by `1/x`. Since the batch size and learning rate have a linear relationship (according to the "ImageNet in an Hour" paper), you simply multiply the learning rate by `1/x` to get the correct learning rate for the whole training set. 
+
+I performed this learning rate search for this dataset, and obtained a maximum learning rate of 0.5 for 1000 samples with a batch size of 64. Since the whole training set is approximately 192000 samples, I have now started training with a learning rate of 0.5/192, or approximately 0.002604 (this is the exact value I used). We will see the results in approximately three days. Peace out man. 
+
+## Apr. 21, 2018
+
+Upon futher reflection, it occurs to me to go *bigger*. Since resnet-34 only took up 4 GB of space on my GPU, I want to go up to resnet-50, with the largest batch size possible. My minimum batch size will be 32. Let's see if I can get that high. I got to batch size 64 successfully with resnet50. Success!
+
+I tested five different learning rates on one epoch of 16000 images: 1.0, 0.5, 0.25, 0.125, and 0.0625. 0.25 was the highest learning rate that performed the same as 0.125 and 0.0625. Now, to scale up to 192k images, I will multiply the learning rate by 16000/192000 to get a final learning rate of approximately 0.083. Now I can run a full experiment, with 41 epochs over the dataset, in order to perform my final experiment. 
+
+Aaaaaaaand I shouldn't do that yet. I should figure out how well this model can fit those 16000 images in a full training run. Then, once it's clear that the validation loss is somewhat decent, I can double the size of the training set and re-run to see if more data yields any improvement on the validation loss. Now, I will run with 16000 images and observe the results. 
+
+Turns out the resnet50 model still can't overfit the training data (loss about 0.5-0.6 on training set). I've run the hyperparameter search on resnet101 and come up with 0.25 as the best learning rate. I will now complete a full training run on resnet101 with learning rate 0.25, and report the results. 
+
+After training it for some time, it definitely yields a better training loss than resnet50 (after 13 epochs the training loss is 0.4--already better than 0.5-0.6, which was the training loss for resnet50), indicating that it is, indeed, able to fit the data better. However, I suspect that even this model will not be good enough. From the MIT paper "Toward Robust Neural Networks Against Adversarial Examples" (or something like that; it's in another repository of mine), I know that wider networks do better against adversarial examples; further, [this](https://arxiv.org/abs/1605.07146v3) paper on Wide Residual Networks suggests that wider is much, much better than deeper. For these reasons, I will try the Wide Residual Network from that paper if this model does not completely overfit the 16000-image subset of the training data. 
+
+## Apr. 22, 2018
+
+The training loss seemed to plateau at 0.4, showing that it cannot overfit the data. I strongly believe that width is going to play an important role in obtaining good performance on this dataset. Based on this intuition, my time would be better spent implementing a Wide Residual Network than running another experiment on a pretrained DenseNet. 
+
+OH MY GOD. I just realized I was only training the final linear layer of each of these Resnet architectures. FUCK. OF COURSE I WAS GETTING TERRIBLE PERFORMANCE. Aw man. Training the entire network, I should be getting much better results. 
+
+First: back down to Resnet18, and doing a batch size test. The largest batch size I can use for resnet18 is 320. Now, let's do a hyperparameter search. The search shows that 0.25 is the largest learning rate which can be used without diverging and losing performance. Now, let's run a full training run on our 16000 images and see if the model can overfit. 
+
+The model is unable to overfit (loss 2.5 on training set). Time to move up to resnet50. Run the batch size tests. Largest batch size possible for resnet50 is 80. Now run the hyperparameter search. The best learning rate appears to be 0.125. Now I will run this run to see if it can overfit the data. 
+
+It did *not* overfit the data. The loss plateaued at a high value again (around 0.7). Clearly, these networks are not enough. I need a shallower, wider network. Next time: using a batch size of 32, multiply the width of a ResNet18 network (number of feature maps in each layer) by a larger and larger constant until no memory is left. Then, we will train the network and see if it can overfit the training data (or, at least, the order-16000 subset of the training images). 'Til next time. 
+
+## Apr. 29, 2018
+
+I looked into applying the Net2WiderNet transform from [this](https://arxiv.org/abs/1511.05641) old 2015 paper; although it is easy in principle, it's not straightforward to apply this transformation to architectures with skip connections. An easier way to obtain a wider network is to use DenseNet and vary the growth factor while training from scratch. 
+
+Additionally, I looked at [this](https://arxiv.org/abs/1804.07612) paper about small-batch training, which advises the use of small batch sizes for better performance. I will try a constant batch size of 32, which was among the best-performing batch sizes on ImageNet (anywhere between 8 and 64 seemed to work fine, given the best learning rate for that batch size). I will test learning rates $2^0, 2^{-1}, ..., 2^{-12}$, which is the set of learning rates tested in the paper, and will select the one which yields the best validation loss after a single epoch. 
+
+Before I complete this, though, I need to adjust my primary script so that it resets the value of `metrics` every time the `main(...)` function is called. This will prevent the problem I observed earlier, during hyperparameter searches, where the loss histories were appended to each other after each run. In addition, I need to fix the lack of log output in the hyperparameter search. 
+
+I fixed the main script to reset the value of `metrics` (I took out threading entirely). I still couldn't fix the lack of log output during hyperparameter searching. However, I found the optimal value for the learning rate to be $2^{-10}$. Now I'll run a full experiment with it: 100 epochs, or when the learning rate drops below $10^{-8}$. Now let's run our experiment. 
+
+## Apr. 30, 2018
+
+EXPERIMENT RUN, AND IT OVERFIT THE TRAINING SET, BY GOD! FANTASTIC! A problem I need to fix: when do I stop training? Basically, I'm having issues with the learning rate scheduler that I need to fix. But that's for tonight. I need to go to work. Peace out!
+
+Aaaaaand I'm back! I've got one hour, so let's make this count. First thing to fix: early stopping issue. Fixed it! Had to directly access `optimizer.param_groups[0]['lr']` to see whether the learning rate was below my chosen threshold. 
+
+Running with 32000 examples, DenseNet can *still* overfit the data--like, hardcore overfit. A couple notes:
+
+* the validation performance is 2% better with 32000 examples so far, but still not spectacular (77% accuracy on validation, with 99.8% accuracy on training);
+
+* the training loss is very unstable (I think this is because I'm not limiting the upper and lower probability limits that I assign to each class; as a result, confidence in wrong answers becomes catastrophic);
+
+* the training accuracy is somewhat unstable (i.e., it seems to fluctuate close to 100% accuracy).
+
+The next steps are to (1) scale up to the full training set, and (2) add data augmentation (random flipping/cropping/rotating, random color augmentation). The purpose of these goals is to decrease the generalization error that the model is currently experiencing. 

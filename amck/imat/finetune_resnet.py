@@ -3,15 +3,12 @@ import collections
 import datetime
 import functools
 import logging
-import multiprocessing
 import pathlib
 import random
 import sys
-import threading
 import typing
 
 
-import matplotlib.pyplot as pyplot
 import torch
 import torch.nn as nn
 import torch.nn.functional as functional
@@ -35,41 +32,9 @@ stream_handler = logging.StreamHandler(sys.stdout)
 stream_handler.setLevel(logging.DEBUG)
 LOGGER.addHandler(stream_handler)
 
-# For coordinating the display of plot data between threads.
-metrics = collections.defaultdict(list)
-
-
-def metrics_plotter():
-    def plot_metrics(clargs):
-        f = pyplot.figure()
-        f.suptitle('Training Metrics')
-
-        for p, (name, vals) in enumerate(metrics.items()):
-            if len(vals) > 1:
-                ax = pyplot.subplot(len(metrics), 2, 2 * p + 1)
-                ax.plot(vals)
-                ax.set_title(name)
-
-                ax = pyplot.subplot(len(metrics), 2, 2 * p + 2)
-                ax.plot(vals[-clargs.short_history:])
-                ax.set_title(name)
-
-        if len(metrics) > 0:
-            pyplot.show(block=True)
-
-    return plot_metrics
-
-
-def command_listener(clargs):
-    while True:
-        command = input()
-        if command == 'metrics':
-            multiprocessing.Process(target=metrics_plotter(), args=(clargs,)).start()
-        elif command == 'exit':
-            exit(0)
-
 
 def train(clargs):
+    metrics = collections.defaultdict(list)
     save_path = pathlib.Path(clargs.save_path)
     save_path.resolve()
     save_path = save_path.absolute()
@@ -99,22 +64,22 @@ def train(clargs):
         training_data_sampler = sampler.SubsetRandomSampler(subset_indices)
     else:
         training_data_sampler = sampler.RandomSampler(training_data)
-    training_data_loader = data.DataLoader(training_data, batch_size=clargs.batch_size,
+    training_data_loader = data.DataLoader(training_data, batch_size=clargs.training_batch_size,
                                            num_workers=clargs.num_workers, sampler=training_data_sampler)
 
     validation_data = datasets.ImageFolder('data/validation', transform=image_transform)
-    validation_data_loader = data.DataLoader(validation_data, batch_size=clargs.batch_size,
+    validation_data_loader = data.DataLoader(validation_data, batch_size=clargs.validation_batch_size,
                                              num_workers=clargs.num_workers)
 
-    resnet: models.ResNet = models.resnet18(pretrained=clargs.pretrained)
-    resnet.fc = nn.Linear(512, 128)
-    resnet.cuda()
+    network: models.DenseNet = models.densenet121(pretrained=clargs.pretrained)
+    network.classifier = nn.Linear(network.classifier.in_features, 128)
+    network.cuda()
 
-    optimizer = optim.SGD(resnet.fc.parameters(), lr=clargs.learning_rate, weight_decay=0.0001)
+    optimizer = optim.SGD(network.parameters(), lr=clargs.learning_rate, weight_decay=0.0001)
     hyperparameters['optimizer'] = optimizer.state_dict()
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, patience=1, verbose=True)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=0, verbose=True, eps=0)
 
-    training_loss_function = functional.cross_entropy
+    training_loss_function = functools.partial(functional.cross_entropy, size_average=False)
     validation_loss_function = functools.partial(functional.cross_entropy, size_average=False)
 
     torch.save(hyperparameters, str(hyperparameters_path))
@@ -125,21 +90,23 @@ def train(clargs):
     best_validation_accuracy = -1.0
     with stopwatch.Stopwatch() as total_time_stopwatch, stopwatch.Stopwatch() as epoch_stopwatch:
         for i in range(clargs.epoch_limit):
-            if scheduler.in_cooldown:
-                metrics['learning_rate_drop_epoch'].append(i)
+            current_lr = optimizer.param_groups[0]['lr']
+            if current_lr < 10**-8:
+                break
+            metrics['lr'].append(current_lr)
 
             LOGGER.debug('Training...')
 
             with training_stopwatch:
                 epoch_loss_history, epoch_acccuracy_history = training.train(
-                    training_data_loader, resnet, optimizer, training_loss_function, cuda=True)
+                    training_data_loader, network, optimizer, training_loss_function, cuda=True)
                 training_stopwatch.lap()
 
             LOGGER.debug('Validating...')
 
             with validation_stopwatch:
                 validation_loss, validation_accuracy = training.evaluate_loss_and_accuracy(
-                    validation_data_loader, resnet, validation_loss_function, cuda=True)
+                    validation_data_loader, network, validation_loss_function, cuda=True)
                 validation_stopwatch.lap()
 
             metrics['training_loss'].extend(epoch_loss_history)
@@ -151,7 +118,7 @@ def train(clargs):
 
             if validation_accuracy > best_validation_accuracy:
                 best_validation_accuracy = validation_accuracy
-                torch.save(resnet, str(model_path))
+                torch.save(network, str(model_path))
                 saving_stopwatch.lap()
 
             torch.save(metrics, metrics_path)
@@ -175,7 +142,8 @@ def train(clargs):
                          .format(training_duration=training_stopwatch.lap_times()[-1],
                                  validation_duration=validation_stopwatch.lap_times()[-1]))
 
-            scheduler.step(validation_accuracy)
+            if not clargs.constant_learning_rate:
+                scheduler.step(1.0 - validation_accuracy)
 
         total_time_stopwatch.lap()
 
@@ -196,41 +164,38 @@ def evaluate(clargs):
     ])
 
     validation_data = datasets.ImageFolder('data/validation', transform=image_transform)
-    validation_data_loader = data.DataLoader(validation_data, batch_size=clargs.batch_size,
+    validation_data_loader = data.DataLoader(validation_data, batch_size=clargs.validation_batch_size,
                                              num_workers=clargs.num_workers)
 
     validation_loss_function = functools.partial(functional.cross_entropy, size_average=False)
 
-    resnet = torch.load(clargs.resnet_model)
-    resnet.cuda()
+    network = torch.load(clargs.model_path)
+    network.cuda()
 
     validation_loss, validation_accuracy = training.evaluate_loss_and_accuracy(
-        validation_data_loader, resnet, validation_loss_function, cuda=True)
+        validation_data_loader, network, validation_loss_function, cuda=True)
 
     LOGGER.info('validation loss:       {}\n'
                 'validation accuracy:   {}'
                 .format(validation_loss, validation_accuracy))
 
 
-def get_args():
+def get_args(raw_args: typing.List[str]):
     arg_parser = argparse.ArgumentParser(
-        description='Trains Resnet-18 from the PyTorch models on the iMaterialist training data, and evaluates trained '
+        description='Trains Resnet from the PyTorch models on the iMaterialist training data, and evaluates trained '
                     'resnet models on iMaterialist validation data.')
     arg_parser.add_argument(
         '--verbose', '-v', action='count', default=0,
         help='Indicate the level of verbosity. Include once to get info logs and twice to include debug-level logs.')
     arg_parser.add_argument('--num-workers', '-w', type=int, default=8,
                             help='Number of processes concurrently loading images from the training dataset.')
-    arg_parser.add_argument('--batch-size', '-b', type=int, default=128, help='Batch size.')
 
     subparsers = arg_parser.add_subparsers(dest='subparser_name')
 
     train_subcommand_parser = subparsers.add_parser(
-        'train', help='Trains a Resnet-18 model on the iMaterialist training data.')
+        'train', help='Trains a Resnet model on the iMaterialist training data.')
     train_subcommand_parser.add_argument('--epoch-limit', '-l', type=int, default=41,
                                          help='The maximum number of epochs for which the network will train.')
-    train_subcommand_parser.add_argument('--short-history', '-s', type=int, default=1500,
-                                         help='The length of the short history to  display in the plot of metrics.')
     train_subcommand_parser.add_argument('--pretrained', '-p', action='store_true', default=False,
                                          help='Indicates that the model should be pretrained on ImageNet.')
     train_subcommand_parser.add_argument('--training-subset', '-t', type=int, default=sys.maxsize,
@@ -241,30 +206,37 @@ def get_args():
     train_subcommand_parser.add_argument('--save-path', '-n', default=str(datetime.datetime.now()).replace(' ', '_'),
                                          help='The directory path under which to save all model results during '
                                               'training.')
+    train_subcommand_parser.add_argument('--constant-learning-rate', '-c', action='store_true', default=False,
+                                         help='Never decrease the learning rate during training.')
+    train_subcommand_parser.add_argument('--training-batch-size', '-b', type=int, default=64,
+                                         help='Training batch size.')
+    train_subcommand_parser.add_argument('--validation-batch-size', '-a', type=int, default=8,
+                                         help='Validation batch size. This parameter is purely for memory management '
+                                              'purposes. A smaller validation batch size reduces the amount of memory '
+                                              'used for validation image loading and computation on the GPU, '
+                                              'leaving more memory for a larger training batch size.')
     train_subcommand_parser.set_defaults(train=True)
 
     evaluate_subcommand_parser = subparsers.add_parser(
-        'evaluate', help='Evaluates a given Resnet-18 model on the iMaterialist validation data.')
+        'evaluate', help='Evaluates a given Resnet model on the iMaterialist validation data.')
     evaluate_subcommand_parser.add_argument('--normalization', '-n', default='imaterialist',
                                             help='Normalization to use for evaluation.')
-    evaluate_subcommand_parser.add_argument('model_directory', help='The model directory for the Resnet-18 model to be '
-                                                                 'evaluated.')
+    evaluate_subcommand_parser.add_argument('model_directory',
+                                            help='The directory containing the model to be evaluated.')
+    evaluate_subcommand_parser.add_argument('--validation-batch-size', '-a', type=int, default=64,
+                                            help='Validation batch size.')
     evaluate_subcommand_parser.set_defaults(evaluate=True)
 
-    parsed_args = arg_parser.parse_args()
+    parsed_args = arg_parser.parse_args(args=raw_args)
 
     # Check additional restrictions on values and types.
 
     if parsed_args.num_workers < 1:
         arg_parser.error("--num-workers must be positive.")
-    if parsed_args.batch_size < 1:
-        arg_parser.error("--batch-size must be positive.")
 
     if parsed_args.train:
         if parsed_args.epoch_limit < 1:
             arg_parser.error("--epoch-limit must be positive.")
-        if parsed_args.short_history < 2:
-            arg_parser.error("--short-history must be at least 2.")
         if parsed_args.training_subset < 1:
             arg_parser.error("--training-subset must be positive.")
         if parsed_args.learning_rate <= 0.0:
@@ -272,6 +244,10 @@ def get_args():
         save_path = pathlib.Path(parsed_args.save_path)
         if save_path.exists():
             arg_parser.error("--save-path must not already exist.")
+        if parsed_args.training_batch_size < 1:
+            arg_parser.error("--training-batch-size must be positive.")
+        if parsed_args.validation_batch_size < 1:
+            arg_parser.error("--validation-batch-size must be positive.")
 
     elif parsed_args.evaluate:
         load_path = pathlib.Path(parsed_args.model_directory)
@@ -285,7 +261,7 @@ def get_args():
 
 def main():
 
-    parsed_args = get_args()
+    parsed_args = get_args(sys.argv[1:])
 
     if parsed_args.verbose == 1:
         LOGGER.setLevel(logging.INFO)
@@ -293,18 +269,9 @@ def main():
         LOGGER.setLevel(logging.DEBUG)
 
     if parsed_args.subparser_name == 'train':
-        thread_target = train
+        train(parsed_args)
     elif parsed_args.subparser_name == 'evaluate':
-        thread_target = evaluate
-    main_thread = threading.Thread(target=thread_target, args=(parsed_args,))
-    main_thread.daemon = True
-    main_thread.start()
-    if parsed_args.subparser_name == 'train':
-        command_thread = threading.Thread(target=command_listener, args=(parsed_args,))
-        command_thread.start()
-        command_thread.join()
-    else:
-        main_thread.join()
+        evaluate(parsed_args)
 
 
 if __name__ == '__main__':
