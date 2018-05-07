@@ -9,6 +9,7 @@ import sys
 import typing
 
 
+import PIL.Image as Image
 import torch
 import torch.nn as nn
 import torch.nn.functional as functional
@@ -28,9 +29,6 @@ import amck.imat.training as training
 # Set up the logging.
 
 LOGGER = logging.getLogger(__name__)
-stream_handler = logging.StreamHandler(sys.stdout)
-stream_handler.setLevel(logging.DEBUG)
-LOGGER.addHandler(stream_handler)
 
 
 def train(clargs):
@@ -51,12 +49,16 @@ def train(clargs):
     else:
         # From iMaterialist.
         normalize = transforms.Normalize(mean=[0.6837, 0.6461, 0.6158], std=[0.2970, 0.3102, 0.3271])
+
     image_transform = transforms.Compose([
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomAffine(degrees=15, scale=(1.0, 1.3), resample=Image.BILINEAR, fillcolor=2 ** 24 - 1),
+        transforms.ColorJitter(brightness=0.2, contrast=0.8, saturation=0.8, hue=0.3),
+        transforms.RandomGrayscale(p=0.1),
         transforms.Resize(224),
         transforms.CenterCrop(224),
         transforms.ToTensor(),
-        normalize
-    ])
+        normalize])
 
     training_data = datasets.ImageFolder('data/training', transform=image_transform)
     if clargs.training_subset < len(training_data):
@@ -71,7 +73,7 @@ def train(clargs):
     validation_data_loader = data.DataLoader(validation_data, batch_size=clargs.validation_batch_size,
                                              num_workers=clargs.num_workers)
 
-    network: models.DenseNet = models.densenet121(pretrained=clargs.pretrained)
+    network: models.DenseNet = models.densenet161(pretrained=clargs.pretrained)
     network.classifier = nn.Linear(network.classifier.in_features, 128)
     network.cuda()
 
@@ -99,18 +101,21 @@ def train(clargs):
 
             with training_stopwatch:
                 epoch_loss_history, epoch_acccuracy_history = training.train(
-                    training_data_loader, network, optimizer, training_loss_function, cuda=True)
+                    training_data_loader, network, optimizer, training_loss_function, cuda=True,
+                    progress_bar=(clargs.verbose >= 2))
                 training_stopwatch.lap()
 
             LOGGER.debug('Validating...')
 
             with validation_stopwatch:
                 validation_loss, validation_accuracy = training.evaluate_loss_and_accuracy(
-                    validation_data_loader, network, validation_loss_function, cuda=True)
+                    validation_data_loader, network, validation_loss_function, cuda=True,
+                    progress_bar=(clargs.verbose >= 2))
                 validation_stopwatch.lap()
 
-            metrics['training_loss'].extend(epoch_loss_history)
-            metrics['validation_loss'].append(validation_loss)
+            metrics['training_loss'].extend(
+                [batch_loss / clargs.training_batch_size for batch_loss in epoch_loss_history])
+            metrics['validation_loss'].append(validation_loss / len(validation_data))
             metrics['training_accuracy'].extend(epoch_acccuracy_history)
             metrics['validation_accuracy'].append(validation_accuracy)
 
@@ -263,7 +268,9 @@ def main():
 
     parsed_args = get_args(sys.argv[1:])
 
-    if parsed_args.verbose == 1:
+    if parsed_args.verbose == 0:
+        LOGGER.setLevel(logging.WARNING)
+    elif parsed_args.verbose == 1:
         LOGGER.setLevel(logging.INFO)
     elif parsed_args.verbose >= 2:
         LOGGER.setLevel(logging.DEBUG)
@@ -275,4 +282,5 @@ def main():
 
 
 if __name__ == '__main__':
+    logging.basicConfig(format='%(asctime)s [%(name)s] %(levelname)s %(message)s', level=logging.DEBUG)
     main()
