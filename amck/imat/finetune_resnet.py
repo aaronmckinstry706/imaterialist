@@ -2,6 +2,7 @@ import argparse
 import collections
 import datetime
 import functools
+import itertools
 import logging
 import pathlib
 import random
@@ -9,6 +10,7 @@ import sys
 import typing
 
 
+import matplotlib.pyplot as pyplot
 import PIL.Image as Image
 import torch
 import torch.nn as nn
@@ -20,13 +22,12 @@ import torch.utils.data.sampler as sampler
 import torchvision.datasets as datasets
 import torchvision.models as models
 import torchvision.transforms as transforms
+import torchvision.utils as utils
 
 
 import amck.imat.stopwatch as stopwatch
 import amck.imat.training as training
 
-
-# Set up the logging.
 
 LOGGER = logging.getLogger(__name__)
 
@@ -53,8 +54,8 @@ def train(clargs):
     image_transform = transforms.Compose([
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomAffine(degrees=15, scale=(1.0, 1.3), resample=Image.BILINEAR, fillcolor=2 ** 24 - 1),
-        transforms.ColorJitter(brightness=0.2, contrast=0.8, saturation=0.8, hue=0.3),
-        transforms.RandomGrayscale(p=0.1),
+        # transforms.ColorJitter(brightness=0.2, contrast=0.8, saturation=0.8, hue=0.3),
+        # transforms.RandomGrayscale(p=0.1),
         transforms.Resize(224),
         transforms.CenterCrop(224),
         transforms.ToTensor(),
@@ -73,7 +74,7 @@ def train(clargs):
     validation_data_loader = data.DataLoader(validation_data, batch_size=clargs.validation_batch_size,
                                              num_workers=clargs.num_workers)
 
-    network: models.DenseNet = models.densenet161(pretrained=clargs.pretrained)
+    network: models.DenseNet = models.densenet121(pretrained=clargs.pretrained)
     network.classifier = nn.Linear(network.classifier.in_features, 128)
     network.cuda()
 
@@ -103,6 +104,7 @@ def train(clargs):
                 epoch_loss_history, epoch_acccuracy_history = training.train(
                     training_data_loader, network, optimizer, training_loss_function, cuda=True,
                     progress_bar=(clargs.verbose >= 2))
+                epoch_loss_history = [batch_loss / clargs.training_batch_size for batch_loss in epoch_loss_history]
                 training_stopwatch.lap()
 
             LOGGER.debug('Validating...')
@@ -111,11 +113,11 @@ def train(clargs):
                 validation_loss, validation_accuracy = training.evaluate_loss_and_accuracy(
                     validation_data_loader, network, validation_loss_function, cuda=True,
                     progress_bar=(clargs.verbose >= 2))
+                validation_loss /= len(validation_data)
                 validation_stopwatch.lap()
 
-            metrics['training_loss'].extend(
-                [batch_loss / clargs.training_batch_size for batch_loss in epoch_loss_history])
-            metrics['validation_loss'].append(validation_loss / len(validation_data))
+            metrics['training_loss'].extend(epoch_loss_history)
+            metrics['validation_loss'].append(validation_loss)
             metrics['training_accuracy'].extend(epoch_acccuracy_history)
             metrics['validation_accuracy'].append(validation_accuracy)
 
@@ -130,22 +132,22 @@ def train(clargs):
 
             epoch_stopwatch.lap()
 
-            LOGGER.info('epoch {epoch}\n'
-                        '- total duration:                  {total_duration}\n'
-                        '- validation loss:                 {validation_loss}\n'
-                        '- validation accuracy:             {validation_accuracy}\n'
-                        '- average training-batch loss:     {avg_training_loss}\n'
-                        '- average training-batch accuracy: {avg_training_accuracy}'
-                        .format(epoch=i,
-                                total_duration=epoch_stopwatch.lap_times()[-1],
-                                validation_loss=validation_loss,
-                                validation_accuracy=validation_accuracy,
-                                avg_training_loss=sum(epoch_loss_history)/float(len(epoch_loss_history)),
-                                avg_training_accuracy=sum(epoch_acccuracy_history)/len(epoch_acccuracy_history)))
-            LOGGER.debug('- training duration:              {training_duration}\n'
-                         '- validation duration:            {validation_duration}'
-                         .format(training_duration=training_stopwatch.lap_times()[-1],
-                                 validation_duration=validation_stopwatch.lap_times()[-1]))
+            print('epoch {epoch}\n'
+                  '- total duration:                  {total_duration}\n'
+                  '- validation loss:                 {validation_loss}\n'
+                  '- validation accuracy:             {validation_accuracy}\n'
+                  '- average training-batch loss:     {avg_training_loss}\n'
+                  '- average training-batch accuracy: {avg_training_accuracy}'
+                  .format(epoch=i,
+                          total_duration=epoch_stopwatch.lap_times()[-1],
+                          validation_loss=validation_loss / len(validation_data),
+                          validation_accuracy=validation_accuracy,
+                          avg_training_loss=sum(epoch_loss_history)/len(epoch_loss_history),
+                          avg_training_accuracy=sum(epoch_acccuracy_history)/len(epoch_acccuracy_history)))
+            print('- training duration:              {training_duration}\n'
+                  '- validation duration:            {validation_duration}'
+                  .format(training_duration=training_stopwatch.lap_times()[-1],
+                          validation_duration=validation_stopwatch.lap_times()[-1]))
 
             if not clargs.constant_learning_rate:
                 scheduler.step(1.0 - validation_accuracy)
@@ -158,9 +160,15 @@ def train(clargs):
 def evaluate(clargs):
     if clargs.normalization == 'imagenet':
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # From Imagenet.
+        inverse_normalize = transforms.Compose([
+            transforms.Normalize(mean=[0., 0., 0.], std=[1 / 0.229, 1 / 0.224, 1 / 0.225]),
+            transforms.Normalize(mean=[-0.485, -0.456, -0.406], std=[1., 1., 1.])])
     elif clargs.normalization == 'imaterialist':
         # From iMaterialist.
         normalize = transforms.Normalize(mean=[0.6837, 0.6461, 0.6158], std=[0.2970, 0.3102, 0.3271])
+        inverse_normalize = transforms.Compose([
+            transforms.Normalize(mean=[0., 0., 0.], std=[1 / 0.2970, 1 / 0.3102, 1 / 0.3271]),
+            transforms.Normalize(mean=[-0.6837, -0.6461, -0.6158], std=[1., 1., 1.])])
     image_transform = transforms.Compose([
         transforms.Resize(224),
         transforms.CenterCrop(224),
@@ -174,15 +182,46 @@ def evaluate(clargs):
 
     validation_loss_function = functools.partial(functional.cross_entropy, size_average=False)
 
-    network = torch.load(clargs.model_path)
+    network = torch.load(str(pathlib.Path(clargs.model_directory) / 'model'))
     network.cuda()
 
-    validation_loss, validation_accuracy = training.evaluate_loss_and_accuracy(
-        validation_data_loader, network, validation_loss_function, cuda=True)
+    validation_loss, validation_accuracy, error_samples = training.evaluate_and_get_error_sample(
+        validation_data_loader, network, validation_loss_function, cuda=True, progress_bar=True)
 
-    LOGGER.info('validation loss:       {}\n'
-                'validation accuracy:   {}'
-                .format(validation_loss, validation_accuracy))
+    # Visualize the distribution of errors over each class.
+    error_images, error_labels = zip(*error_samples)
+    error_images = [inverse_normalize(image) for image in error_images]
+    error_distribution_by_class = collections.defaultdict(float)
+    for label in error_labels:
+        error_distribution_by_class[str(label)] += 1
+    # for key in error_labels:
+    #     error_distribution_by_class[str(key)] /= len(error_labels)
+    sorted_error_label_strings, sorted_error_label_distribution = zip(
+        *sorted(error_distribution_by_class.items(), key=lambda t: (-t[1], t[0])))
+    _, axes = pyplot.subplots(2, 1)
+    pyplot.title('Error Distribution Over Classes')
+    axes[0].bar(sorted_error_label_strings, sorted_error_label_distribution)
+    axes[0].set_title('Counts')
+    axes[1].bar(sorted_error_label_strings, [s for s in itertools.accumulate(sorted_error_label_distribution)])
+    axes[1].set_title('Cumulative Counts')
+
+    # Visualize a random subset of images from the set of errors.
+    pyplot.figure()
+    error_image_subset_indexes = random.sample(range(len(error_images)), 64)
+    error_image_grid = utils.make_grid(
+        [error_images[i] for i in error_image_subset_indexes],
+        nrow=min(8, len(error_image_subset_indexes)))
+    pyplot.imshow(error_image_grid.permute(1, 2, 0).numpy())
+    for grid_index, error_index in enumerate(error_image_subset_indexes):
+        if grid_index % 8 == 0 and grid_index > 0:
+            print(end='\n')
+        print(error_labels[error_index], end=' ')
+
+    pyplot.show()
+
+    print('validation loss:       {}\n'
+          'validation accuracy:   {}'
+          .format(validation_loss, validation_accuracy))
 
 
 def get_args(raw_args: typing.List[str]):
@@ -239,7 +278,7 @@ def get_args(raw_args: typing.List[str]):
     if parsed_args.num_workers < 1:
         arg_parser.error("--num-workers must be positive.")
 
-    if parsed_args.train:
+    if parsed_args.subparser_name == 'train':
         if parsed_args.epoch_limit < 1:
             arg_parser.error("--epoch-limit must be positive.")
         if parsed_args.training_subset < 1:
@@ -254,7 +293,7 @@ def get_args(raw_args: typing.List[str]):
         if parsed_args.validation_batch_size < 1:
             arg_parser.error("--validation-batch-size must be positive.")
 
-    elif parsed_args.evaluate:
+    elif parsed_args.subparser_name == 'evaluate':
         load_path = pathlib.Path(parsed_args.model_directory)
         if not load_path.exists():
             arg_parser.error("model_directory must exist.")
@@ -269,11 +308,12 @@ def main():
     parsed_args = get_args(sys.argv[1:])
 
     if parsed_args.verbose == 0:
-        LOGGER.setLevel(logging.WARNING)
+        logging_level = logging.WARNING
     elif parsed_args.verbose == 1:
-        LOGGER.setLevel(logging.INFO)
+        logging_level = logging.INFO
     elif parsed_args.verbose >= 2:
-        LOGGER.setLevel(logging.DEBUG)
+        logging_level = logging.DEBUG
+    logging.basicConfig(format='%(asctime)s [%(name)s] %(levelname)s %(message)s', level=logging_level)
 
     if parsed_args.subparser_name == 'train':
         train(parsed_args)
@@ -282,5 +322,4 @@ def main():
 
 
 if __name__ == '__main__':
-    logging.basicConfig(format='%(asctime)s [%(name)s] %(levelname)s %(message)s', level=logging.DEBUG)
     main()

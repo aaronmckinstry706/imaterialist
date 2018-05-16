@@ -5,6 +5,7 @@ import sys
 import typing
 
 
+import numpy
 import torch
 import torch.autograd as autograd
 import torch.nn as nn
@@ -182,7 +183,8 @@ def test_evaluate_accuracy(cuda=False, progress_bar=False):
 
 def evaluate_loss_and_accuracy(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],
                                network: nn.Module,
-                               loss_function: typing.Callable[[autograd.Variable, autograd.Variable], autograd.Variable],
+                               loss_function: typing.Callable[
+                                   [autograd.Variable, autograd.Variable], autograd.Variable],
                                cuda=False,
                                progress_bar=False):
     network.eval()
@@ -234,6 +236,80 @@ def test_evaluate_loss_and_accuracy(cuda=False, progress_bar=False):
     assert accuracy == 0.5
 
 
+def evaluate_and_get_error_sample(dataset: typing.Iterable[typing.Tuple[torch.Tensor, torch.LongTensor]],
+                                  network: nn.Module,
+                                  loss_function: typing.Callable[
+                                      [autograd.Variable, autograd.Variable], autograd.Variable],
+                                  cuda=False,
+                                  progress_bar=False):
+        network.eval()
+        loss = 0
+        total_num_correct = 0
+        total_samples = 0
+        errors = []
+        with tqdm.tqdm(total=len(dataset), disable=not progress_bar) as bar:
+            for i, (images, labels) in enumerate(dataset):
+                if cuda:
+                    images = images.cuda()
+                    labels = labels.cuda()
+                network_output = network(images)
+
+                loss += loss_function(network_output, labels).item()
+
+                _, predicted_indices = torch.max(network_output.data, 1)
+                correct = torch.eq(predicted_indices, labels.data)
+                total_num_correct += torch.sum(correct).item()
+                total_samples += len(images)
+
+                not_correct = 1 - correct
+                for sample_index, (image, label) in enumerate(zip(images, labels)):
+                    if not_correct[sample_index].item():
+                        errors.append((image.cpu(), label.item()))
+
+                bar.update(1)
+        return loss, total_num_correct / total_samples, errors
+
+
+def test_evaluate_and_get_error_samples(cuda=False, progress_bar=False):
+    class SimpleLinear(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = nn.Linear(3, 3)
+            self.fc.weight.data.fill_(0)
+            self.fc.bias.data = torch.FloatTensor([math.log(0.5), math.log(0.25), math.log(0.25)])
+
+        def forward(self, x):
+            return self.fc(x)
+
+    network = SimpleLinear()
+    if cuda:
+        network.cuda()
+    dataset_images = torch.rand(12, 3, dtype=torch.float32)
+    dataset_labels = torch.LongTensor([0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2])
+    dataset = data.TensorDataset(dataset_images, dataset_labels)
+    dataloader = data.DataLoader(dataset, batch_size=4, shuffle=False, num_workers=1)
+    loss_function = functools.partial(functional.cross_entropy, size_average=False)
+    loss, accuracy, errors = evaluate_and_get_error_sample(
+        dataloader, network, loss_function, cuda=cuda, progress_bar=progress_bar)
+
+    for sample_index, (image, label) in enumerate(errors):
+        assert torch.prod(
+            torch.le(
+                torch.abs(1.0 - image / dataset_images[6:][sample_index]),
+                numpy.nextafter(1.0, 2.0)))
+        assert label == dataset_labels[6:][sample_index].item()
+
+    loss_values_by_label = -1.0 * torch.log(torch.FloatTensor([0.5, 0.25, 0.25]))
+    expected_sample_losses = torch.FloatTensor([loss_values_by_label[0]]*6 + [loss_values_by_label[1]]*6)
+    expected_loss = torch.sum(expected_sample_losses)
+
+    assert isinstance(loss, float)
+    assert loss == expected_loss
+
+    assert isinstance(accuracy, float)
+    assert accuracy == 0.5
+
+
 if __name__ == '__main__':
     test_train()
     test_train(cuda=True)
@@ -247,3 +323,6 @@ if __name__ == '__main__':
     test_evaluate_loss_and_accuracy()
     test_evaluate_loss_and_accuracy(cuda=True)
     test_evaluate_loss_and_accuracy(progress_bar=True)
+    test_evaluate_and_get_error_samples()
+    test_evaluate_and_get_error_samples(cuda=True)
+    test_evaluate_and_get_error_samples(progress_bar=True)
