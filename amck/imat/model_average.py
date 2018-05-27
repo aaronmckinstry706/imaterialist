@@ -29,7 +29,7 @@ class ModelAverage(nn.Module):
             linear_outputs.append(functional.softmax(module(x), dim=1))
         # Make a len(self.modules)-by-(batch size)-by-(num classes) Tensor from the set of outputs.
         concatenated_outputs = torch.cat([torch.unsqueeze(linear_output, dim=0) for linear_output in linear_outputs])
-        return torch.mean(concatenated_outputs, 0)
+        return torch.log(torch.mean(concatenated_outputs, 0))
 
 
 class TestNet(nn.Module):
@@ -55,10 +55,10 @@ def test_model_average():
     model_average = ModelAverage(model1, model2)
     model_average.eval()
     tensor_input = torch.randn(2, 3)
-    expected_output = torch.tensor([[0.5, 0.5], [0.5, 0.5]])
+    expected_output = torch.log(torch.tensor([[0.5, 0.5], [0.5, 0.5]]))
     assert (
         numpy.nextafter(1.0, 2.0, dtype=numpy.float32) >=
-        torch.abs(1.0 - torch.abs(model_average(tensor_input).detach() / expected_output))
+        torch.abs(1.0 - model_average(tensor_input).detach() / expected_output)
     ).all()
 
 
