@@ -512,4 +512,20 @@ Great, I implemented it. Two things: plan for changes to `evaluate()` function, 
 
 First, let's fix the `ModelAverage` class. Fixed it. 
 
-Next, let's fix the `evaluate()` code. Before we do this, we need to evaluate what has been changed, so that I can determine whether to commit any code before making futher changes. 
+Next, let's fix the `evaluate()` code. Before we do this, we need to evaluate what has been changed, so that I can determine whether to commit any code before making futher changes. After evaluating, there were a few things to commit; however, I have not changed anything since the last run of `vgg19_bn`, so I do not feel a need to test the script. Back to fixing the `evaluate()` code. 
+
+Fixed it. Averaged the probabilities from VGG and DenseNet, and got 86%--an improvement of 2% over the accuracies of 84% from each respective model. It's a small improvement; with more models, it's likely that I would see some improvement--but it's not clear how much improvement. 
+
+Tomorrow, I'll implement n-crop averaging. I need to change two areas of code: the evaluation function, and the transformation function that gets passed to the `ImageFolder` dataset constructor. This code snippet looks useful:
+
+```
+input, target = batch
+# input is a 5d tensor
+bs, ncrops, c, h, w = input.size()
+result = model(input.view(-1, c, h, w)) # fuse batch size and ncrops
+# say result is a 2D tensor
+result_averaged = result.view(bs, ncrops, -1).mean(1) # avg over crops
+```
+
+I'll figure out the details tomorrow. 
+
