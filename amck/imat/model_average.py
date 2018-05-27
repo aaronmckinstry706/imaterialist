@@ -56,9 +56,11 @@ def test_model_average():
     model_average.eval()
     tensor_input = torch.randn(2, 3)
     expected_output = torch.log(torch.tensor([[0.5, 0.5], [0.5, 0.5]]))
+    actual_output = model_average(tensor_input).detach()
     assert (
-        numpy.nextafter(1.0, 2.0, dtype=numpy.float32) >=
-        torch.abs(1.0 - model_average(tensor_input).detach() / expected_output)
+        numpy.nextafter(1.0, 2.0, dtype=numpy.float32) - 1.0
+        >=
+        torch.abs(1.0 - actual_output / expected_output)
     ).all()
 
 
