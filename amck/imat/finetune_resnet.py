@@ -57,7 +57,7 @@ def train(clargs):
         # transforms.ColorJitter(brightness=0.2, contrast=0.8, saturation=0.8, hue=0.3),
         # transforms.RandomGrayscale(p=0.1),
         transforms.Resize(224),
-        transforms.CenterCrop(224),
+        transforms.RandomCrop(224),
         transforms.ToTensor(),
         normalize])
 
@@ -74,8 +74,8 @@ def train(clargs):
     validation_data_loader = data.DataLoader(validation_data, batch_size=clargs.validation_batch_size,
                                              num_workers=clargs.num_workers)
 
-    network: models.DenseNet = models.densenet121(pretrained=clargs.pretrained)
-    network.classifier = nn.Linear(network.classifier.in_features, 128)
+    network: models.VGG = models.vgg19_bn(pretrained=clargs.pretrained)
+    network.classifier[6] = nn.Linear(network.classifier[6].in_features, 128)
     network.cuda()
 
     optimizer = optim.SGD(network.parameters(), lr=clargs.learning_rate, weight_decay=0.0001)
@@ -140,7 +140,7 @@ def train(clargs):
                   '- average training-batch accuracy: {avg_training_accuracy}'
                   .format(epoch=i,
                           total_duration=epoch_stopwatch.lap_times()[-1],
-                          validation_loss=validation_loss / len(validation_data),
+                          validation_loss=validation_loss,
                           validation_accuracy=validation_accuracy,
                           avg_training_loss=sum(epoch_loss_history)/len(epoch_loss_history),
                           avg_training_accuracy=sum(epoch_acccuracy_history)/len(epoch_acccuracy_history)))
@@ -169,6 +169,7 @@ def evaluate(clargs):
         inverse_normalize = transforms.Compose([
             transforms.Normalize(mean=[0., 0., 0.], std=[1 / 0.2970, 1 / 0.3102, 1 / 0.3271]),
             transforms.Normalize(mean=[-0.6837, -0.6461, -0.6158], std=[1., 1., 1.])])
+
     image_transform = transforms.Compose([
         transforms.Resize(224),
         transforms.CenterCrop(224),

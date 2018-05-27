@@ -27,7 +27,7 @@ def main():
         legend = []
         pyplot.subplot(*subplot_args)
         for lr, linestyle in zip(lrs, linestyles):
-            metrics_path = pathlib.Path('models/densenet161/hypersearch_subset16000augmented_lr' + lr + '/metrics')
+            metrics_path = pathlib.Path('models/vgg19_bn/hypersearch_subset16000augmented_lr' + lr + '/metrics')
             if metrics_path.exists() and metrics_path.is_file():
                 d = torch.load(str(metrics_path))
                 training_loss = d[metric]

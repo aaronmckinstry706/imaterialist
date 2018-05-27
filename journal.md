@@ -471,3 +471,45 @@ I think I get the categories. It's a combination of furniture type and material 
 Regardless, these are *difficult* categories. I will have to rethink my straightforward neural net approach. Maybe a decision tree of neural networks for particularly difficult categories? 
 
 Hmmm. Regardless, let's just try using random crop with desnenet121, using the same learning rate as before, but adding the non-color-changing data augmentations. The color-changing augmentations may actually hinder generalization if the color is important to the style (bold vs soft colors, etc.). 
+
+## May 16, 2018
+
+It didn't work. The best performance was only 84%, as expected. Here are some thoughts I had in the interim:
+
+> Group visually similar things (chair categories vs. bed categories, etc.) manually until you have a fairly distinct (and smaller) set of classes. Then, for each group, train custom network for just those classes. It's a lot more computation, but it should yield decent results.
+
+> To group the categories, I need to finish labelling each category as best I can UGH. 
+
+> Okay, problem here. I think that doing this tree-of-networks idea would increase generalization error significantly, especially since so little data exists for a much smaller group of categories (say, three or four). Better techniques to try: adding dropout, model averaging, getting more unlabeled data for self-labeling. 
+
+> Dropout is already present in most models anyway (and is present in DenseNet, in particular). More unlabeled data for self-labeling is more work for me, since I'd have to track down the latest research in this particular area. 
+
+> The easiest (for me, right now) technique to try is model averaging. I'll train VGG-19 (w BN), ResNet-50, and Inception v3. Then, I'll average the model outputs to determine validation performance. 
+
+> In addition: test time augmentations! I.e., do averaging of probabilities over multiple transformations (flips/crops) of the image at test time.
+
+For now, we'll train VGG on 16k-subset to choose best learning rate. Then we'll train on the full dataset with said learning rate. Off we go!
+
+## May 21, 2018
+
+After choosing the best learning rate, I ran the model and obtained a best validation accuracy of ~84%. Approximately the same as before. The next model I need to train is ResNet-50. I also need to implement the logic for model averaging and test-time augmentation. Then, I need to implement the final test-time output. Then I will make my submission with the best model and settings I have available. But, this is all to be done later, because I'm exhausted after the wedding. Peace out, my man. 
+
+HAHAAAAAAAA jk broski, I'm doing this today. 
+
+## May 22, 2018
+
+I tried. I really tried. I was so tired though. I've got one more week of competition left, which translates to one weekend of work for me. This weekend I've got to finish the three things I mentioned above: test-time augmentation (just use 10-crop; it'll be slightly unbalanced, but it'll be less work to implement), model averaging, and final test output. 
+
+## May 25, 2018
+
+First, and probably the easiest, thing: implement model averaging. This means (a) creating a composite model, and (b), evaluating that composite model. The composite model should be a `nn.Module` whose constructor takes two models whose output to average, and puts them in a `nn.ModuleList`. The `forward` function of this model will execute both models, compute the `log_softmax` function on each of the separate network outputs, and then average the resulting probabilities--but wait! That doesn't make sense, since the logs can't be averaged to get correct probabilities. We have to perform two steps: first do `softmax`, then average, then take the `log`. The loss function will have to be changed from `cross_entropy`, which performs softmax internally, to `nll_loss`, which operates on the log-probabilities of each class. 
+
+Except, wait! Will both of these models fit into GPU memory at the same time? I think they will. If not, we will have to consider other approaches. 
+
+Now, to the implementation. 
+
+Great, I implemented it. Two things: plan for changes to `evaluate()` function, and fix for `ModelAverage` class. Changes to `evaluate()`: change `--save-path` option to `--save-paths` and set parameter `nargs='+'`; change model loading code to load all modules into a list, and then pass those modules to the `ModelAverage` constructor. Fix for `ModelAverage` class: output the *log* of the probabilities, instead of the probabilities themselves. 
+
+First, let's fix the `ModelAverage` class. Fixed it. 
+
+Next, let's fix the `evaluate()` code. Before we do this, we need to evaluate what has been changed, so that I can determine whether to commit any code before making futher changes. 
