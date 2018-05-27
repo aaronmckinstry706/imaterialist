@@ -25,6 +25,7 @@ import torchvision.transforms as transforms
 import torchvision.utils as utils
 
 
+import amck.imat.model_average as model_average
 import amck.imat.stopwatch as stopwatch
 import amck.imat.training as training
 
@@ -181,13 +182,21 @@ def evaluate(clargs):
     validation_data_loader = data.DataLoader(validation_data, batch_size=clargs.validation_batch_size,
                                              num_workers=clargs.num_workers)
 
-    validation_loss_function = functools.partial(functional.cross_entropy, size_average=False)
+    validation_loss_function = functools.partial(functional.nll_loss, size_average=False)
 
-    network = torch.load(str(pathlib.Path(clargs.model_directory) / 'model'))
+    loaded_models: typing.List[nn.Module] = []
+    for model_directory in clargs.model_directories:
+        current_model = torch.load(str(pathlib.Path(model_directory) / 'model'))
+        loaded_models.append(current_model)
+    network = model_average.ModelAverage(*loaded_models)
     network.cuda()
 
     validation_loss, validation_accuracy, error_samples = training.evaluate_and_get_error_sample(
         validation_data_loader, network, validation_loss_function, cuda=True, progress_bar=True)
+
+    print('validation loss:       {}\n'
+          'validation accuracy:   {}'
+          .format(validation_loss, validation_accuracy))
 
     # Visualize the distribution of errors over each class.
     error_images, error_labels = zip(*error_samples)
@@ -219,10 +228,6 @@ def evaluate(clargs):
         print(error_labels[error_index], end=' ')
 
     pyplot.show()
-
-    print('validation loss:       {}\n'
-          'validation accuracy:   {}'
-          .format(validation_loss, validation_accuracy))
 
 
 def get_args(raw_args: typing.List[str]):
@@ -266,9 +271,9 @@ def get_args(raw_args: typing.List[str]):
         'evaluate', help='Evaluates a given Resnet model on the iMaterialist validation data.')
     evaluate_subcommand_parser.add_argument('--normalization', '-n', default='imaterialist',
                                             help='Normalization to use for evaluation.')
-    evaluate_subcommand_parser.add_argument('model_directory',
-                                            help='The directory containing the model to be evaluated.')
-    evaluate_subcommand_parser.add_argument('--validation-batch-size', '-a', type=int, default=64,
+    evaluate_subcommand_parser.add_argument('model_directories', nargs='+',
+                                            help='directories containing models to be averaged and evaluated.')
+    evaluate_subcommand_parser.add_argument('--validation-batch-size', '-a', type=int, default=2,
                                             help='Validation batch size.')
     evaluate_subcommand_parser.set_defaults(evaluate=True)
 
@@ -295,11 +300,12 @@ def get_args(raw_args: typing.List[str]):
             arg_parser.error("--validation-batch-size must be positive.")
 
     elif parsed_args.subparser_name == 'evaluate':
-        load_path = pathlib.Path(parsed_args.model_directory)
-        if not load_path.exists():
-            arg_parser.error("model_directory must exist.")
-        elif not load_path.is_dir():
-            arg_parser.error("model_directory must be a directory.")
+        for model_directory in parsed_args.model_directories:
+            load_path = pathlib.Path(model_directory)
+            if not load_path.exists():
+                arg_parser.error("model_directory must exist.")
+            elif not load_path.is_dir():
+                arg_parser.error("model_directory must be a directory.")
 
     return parsed_args
 
