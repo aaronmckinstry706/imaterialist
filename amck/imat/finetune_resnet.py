@@ -26,6 +26,7 @@ import torchvision.utils as utils
 
 
 import amck.imat.model_average as model_average
+import amck.imat.ncrop_average as ncrop_average
 import amck.imat.stopwatch as stopwatch
 import amck.imat.training as training
 
@@ -171,11 +172,13 @@ def evaluate(clargs):
             transforms.Normalize(mean=[0., 0., 0.], std=[1 / 0.2970, 1 / 0.3102, 1 / 0.3271]),
             transforms.Normalize(mean=[-0.6837, -0.6461, -0.6158], std=[1., 1., 1.])])
 
+    def stack_crops_and_normalize(crops: typing.List[torch.Tensor]):
+        return torch.stack([normalize(transforms.ToTensor()(crop)) for crop in crops])
+
     image_transform = transforms.Compose([
         transforms.Resize(224),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        normalize
+        transforms.FiveCrop(224),
+        transforms.Lambda(stack_crops_and_normalize)
     ])
 
     validation_data = datasets.ImageFolder('data/validation', transform=image_transform)
@@ -187,7 +190,7 @@ def evaluate(clargs):
     loaded_models: typing.List[nn.Module] = []
     for model_directory in clargs.model_directories:
         current_model = torch.load(str(pathlib.Path(model_directory) / 'model'))
-        loaded_models.append(current_model)
+        loaded_models.append(ncrop_average.NCropAverage(current_model))
     network = model_average.ModelAverage(*loaded_models)
     network.cuda()
 
@@ -198,36 +201,37 @@ def evaluate(clargs):
           'validation accuracy:   {}'
           .format(validation_loss, validation_accuracy))
 
-    # Visualize the distribution of errors over each class.
-    error_images, error_labels = zip(*error_samples)
-    error_images = [inverse_normalize(image) for image in error_images]
-    error_distribution_by_class = collections.defaultdict(float)
-    for label in error_labels:
-        error_distribution_by_class[str(label)] += 1
-    # for key in error_labels:
-    #     error_distribution_by_class[str(key)] /= len(error_labels)
-    sorted_error_label_strings, sorted_error_label_distribution = zip(
-        *sorted(error_distribution_by_class.items(), key=lambda t: (-t[1], t[0])))
-    _, axes = pyplot.subplots(2, 1)
-    pyplot.title('Error Distribution Over Classes')
-    axes[0].bar(sorted_error_label_strings, sorted_error_label_distribution)
-    axes[0].set_title('Counts')
-    axes[1].bar(sorted_error_label_strings, [s for s in itertools.accumulate(sorted_error_label_distribution)])
-    axes[1].set_title('Cumulative Counts')
-
-    # Visualize a random subset of images from the set of errors.
-    pyplot.figure()
-    error_image_subset_indexes = random.sample(range(len(error_images)), 64)
-    error_image_grid = utils.make_grid(
-        [error_images[i] for i in error_image_subset_indexes],
-        nrow=min(8, len(error_image_subset_indexes)))
-    pyplot.imshow(error_image_grid.permute(1, 2, 0).numpy())
-    for grid_index, error_index in enumerate(error_image_subset_indexes):
-        if grid_index % 8 == 0 and grid_index > 0:
-            print(end='\n')
-        print(error_labels[error_index], end=' ')
-
-    pyplot.show()
+    # TODO: fix this section to handle the ncrop-averaging modification.
+    # # Visualize the distribution of errors over each class.
+    # error_images, error_labels = zip(*error_samples)
+    # error_images = [inverse_normalize(image) for image in error_images]
+    # error_distribution_by_class = collections.defaultdict(float)
+    # for label in error_labels:
+    #     error_distribution_by_class[str(label)] += 1
+    # # for key in error_labels:
+    # #     error_distribution_by_class[str(key)] /= len(error_labels)
+    # sorted_error_label_strings, sorted_error_label_distribution = zip(
+    #     *sorted(error_distribution_by_class.items(), key=lambda t: (-t[1], t[0])))
+    # _, axes = pyplot.subplots(2, 1)
+    # pyplot.title('Error Distribution Over Classes')
+    # axes[0].bar(sorted_error_label_strings, sorted_error_label_distribution)
+    # axes[0].set_title('Counts')
+    # axes[1].bar(sorted_error_label_strings, [s for s in itertools.accumulate(sorted_error_label_distribution)])
+    # axes[1].set_title('Cumulative Counts')
+    #
+    # # Visualize a random subset of images from the set of errors.
+    # pyplot.figure()
+    # error_image_subset_indexes = random.sample(range(len(error_images)), 64)
+    # error_image_grid = utils.make_grid(
+    #     [error_images[i] for i in error_image_subset_indexes],
+    #     nrow=min(8, len(error_image_subset_indexes)))
+    # pyplot.imshow(error_image_grid.permute(1, 2, 0).numpy())
+    # for grid_index, error_index in enumerate(error_image_subset_indexes):
+    #     if grid_index % 8 == 0 and grid_index > 0:
+    #         print(end='\n')
+    #     print(error_labels[error_index], end=' ')
+    #
+    # pyplot.show()
 
 
 def get_args(raw_args: typing.List[str]):

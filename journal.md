@@ -529,3 +529,14 @@ result_averaged = result.view(bs, ncrops, -1).mean(1) # avg over crops
 
 I'll figure out the details tomorrow. 
 
+## May 27, 2018
+
+Now, back to adding n-crop averaging. 
+
+OH MY GOD I HAVE A SOLUTION. 
+
+Create a wrapper model, like I did for model averaging. The constructor will take the base model as a parameter, and will take the The model will take tensors with dimension (batch size)-by-(num crops)-by-(remaining dims); it will partially flatten the tensors using `x.view(len(x) * self.n, -1)`, feed it as a single batch to the given model, perform `functional.softmax(x, dim=1)` to get the probabilities, use `x.view(len(x), self.n, -1)` to get the crop dimension back, perform `torch.mean(x, dim=1)` to get the mean of probabilities on different crops (the `mean` function, by default, removes the dimension along which the mean was taken), and then return the result. 
+
+Then I can use the model averaging function, as I did before, to combine it with model averaging. Awesome!
+
+Now the only thing to figure out is how to transform the list of crops into a single tensor for concatenation into batches. 

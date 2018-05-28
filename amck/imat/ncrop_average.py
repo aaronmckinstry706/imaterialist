@@ -13,7 +13,7 @@ LOGGER = logging.getLogger(__name__)
 
 class NCropAverage(nn.Module):
     """This class wraps a nn.Module instance. The forward function expects a tensor of dimension
-    (batch size)-by-(num crops)-by-(num classes). It computes the class probabilities for each crop, averages over
+    (batch size)-by-(num crops)-by-(remaining dims). It computes the class probabilities for each crop, averages over
     the set of crops for each sample in the batch, and then returns the log of these averaged probabilities. Note
     that the base module must produce linear class scores as output (i.e., pre-softmax)."""
 
@@ -24,9 +24,13 @@ class NCropAverage(nn.Module):
     def forward(self, x: torch.Tensor):
         batch_size = x.size(0)
         num_crops = x.size(1)
-        x = x.view(batch_size * num_crops, -1)
-        x = functional.softmax(self.base_module(x), dim=1)
-        x = x.view(batch_size, num_crops, -1)
+        remaining_dims = x.size()[2:]
+        flattened_dims = (batch_size * num_crops,) + remaining_dims
+        x = x.view(*flattened_dims)
+        x = self.base_module(x)
+        x = functional.softmax(x, dim=1)
+        unflattened_output_dims = (batch_size, num_crops, x.size(-1))
+        x = x.view(unflattened_output_dims)
         x = torch.mean(x, dim=1)
         return x
 
