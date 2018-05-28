@@ -539,4 +539,10 @@ Create a wrapper model, like I did for model averaging. The constructor will tak
 
 Then I can use the model averaging function, as I did before, to combine it with model averaging. Awesome!
 
-Now the only thing to figure out is how to transform the list of crops into a single tensor for concatenation into batches. 
+Now the only thing to figure out is how to transform the list of crops into a single tensor for concatenation into batches. I wrote the code. Now I need to write the test function. I need two "crops", which perform differently for the same network. I wrote the test function. Now I need to write the transformation function. I wrote it, and debugged some issues with the n-crop averaging that I discovered. 
+
+After doing 5-crop averaging, the score was only increased to 86.5%, an increase of 0.4%--which is negligible. 
+
+It is too late to train another model, I think, as the submission is due Wednesday--though that would probably increase the accuracy even further. It is also too late to attempt some sort of crazy method I've never tried before. All this being said, the best option is to write the test output functions and make my final submission (with approximately 13.5% error; not bad, considering the difficulty of the problem!). 
+
+I will plan this in the morning, and execute this in the afternoon. 
