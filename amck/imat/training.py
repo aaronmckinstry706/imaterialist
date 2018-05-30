@@ -1,8 +1,9 @@
 import functools
 import logging
 import math
+import pathlib
 import sys
-import typing
+from typing import Tuple, Callable, Iterable, Dict
 
 
 import numpy
@@ -23,10 +24,10 @@ LOGGER.addHandler(stream_handler)
 LOGGER.setLevel(LOGGING_LEVEL)
 
 
-def train(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],
+def train(dataset: Iterable[Tuple[torch.FloatTensor, torch.LongTensor]],
           network: nn.Module,
           optimizer: optim.Optimizer,
-          loss_function: typing.Callable[[autograd.Variable, autograd.Variable], autograd.Variable],
+          loss_function: Callable[[autograd.Variable, autograd.Variable], autograd.Variable],
           cuda=False,
           progress_bar=False):
     """
@@ -94,9 +95,9 @@ def test_train(cuda=False, progress_bar=False):
         assert 0.0 <= accuracy <= 1.0
 
 
-def evaluate_loss(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],
+def evaluate_loss(dataset: Iterable[Tuple[torch.FloatTensor, torch.LongTensor]],
                   network: nn.Module,
-                  loss_function: typing.Callable[[autograd.Variable, autograd.Variable], autograd.Variable],
+                  loss_function: Callable[[autograd.Variable, autograd.Variable], autograd.Variable],
                   cuda=False,
                   progress_bar=False):
     """
@@ -141,7 +142,7 @@ def test_evaluate_loss(cuda=False, progress_bar=False):
     assert isinstance(evaluate_loss(dataloader, network, loss_function, cuda=cuda, progress_bar=progress_bar), float)
 
 
-def evaluate_accuracy(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],
+def evaluate_accuracy(dataset: Iterable[Tuple[torch.FloatTensor, torch.LongTensor]],
                       network: nn.Module,
                       cuda=False,
                       progress_bar=False):
@@ -181,9 +182,9 @@ def test_evaluate_accuracy(cuda=False, progress_bar=False):
     assert accuracy == 0.5
 
 
-def evaluate_loss_and_accuracy(dataset: typing.Iterable[typing.Tuple[torch.FloatTensor, torch.LongTensor]],
+def evaluate_loss_and_accuracy(dataset: Iterable[Tuple[torch.FloatTensor, torch.LongTensor]],
                                network: nn.Module,
-                               loss_function: typing.Callable[
+                               loss_function: Callable[
                                    [autograd.Variable, autograd.Variable], autograd.Variable],
                                cuda=False,
                                progress_bar=False):
@@ -236,9 +237,9 @@ def test_evaluate_loss_and_accuracy(cuda=False, progress_bar=False):
     assert accuracy == 0.5
 
 
-def evaluate_and_get_error_sample(dataset: typing.Iterable[typing.Tuple[torch.Tensor, torch.LongTensor]],
+def evaluate_and_get_error_sample(dataset: Iterable[Tuple[torch.Tensor, torch.LongTensor]],
                                   network: nn.Module,
-                                  loss_function: typing.Callable[
+                                  loss_function: Callable[
                                       [autograd.Variable, autograd.Variable], autograd.Variable],
                                   cuda=False,
                                   progress_bar=False):
@@ -310,6 +311,50 @@ def test_evaluate_and_get_error_samples(cuda=False, progress_bar=False):
     assert accuracy == 0.5
 
 
+def predict(dataset: Iterable[Tuple[torch.Tensor, pathlib.Path]],
+            network: nn.Module,
+            cuda=False,
+            progress_bar=False):
+    network.eval()
+    predictions: Dict[pathlib.Path, int] = dict()
+    with tqdm.tqdm(total=len(dataset), disable=not progress_bar) as bar:
+        for i, (images, paths) in enumerate(dataset):
+            if cuda:
+                images = images.cuda()
+            network_output: torch.Tensor = network(images)
+            _, predicted_indices = torch.max(network_output.detach(), 1)
+            for batch_index in range(len(images)):
+                predictions[paths[batch_index]] = predicted_indices[batch_index].item() + 1
+            bar.update(1)
+
+    return predictions
+
+
+def test_predict(cuda=False, progress_bar=False):
+
+    class IdentityNet(nn.Module):
+
+        def __init__(self):
+            super().__init__()
+            self.linear = nn.Linear(3, 3)
+            self.linear.bias.data.fill_(0)
+            self.linear.weight.data = torch.eye(3)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return self.linear(x)
+
+    dataset = [
+        (torch.Tensor([[1, 0, 0], [0, 1, 0]]), [pathlib.Path(str(i)) for i in range(0, 2)]),
+        (torch.Tensor([[0, 1, 0], [0, 0, 1]]), [pathlib.Path(str(i)) for i in range(2, 4)])
+    ]
+    expected_predictions = {pathlib.Path('0'): 1, pathlib.Path('1'): 2, pathlib.Path('2'): 2, pathlib.Path('3'): 3}
+    net = IdentityNet()
+    if cuda:
+        net.cuda()
+    actual_predictions = predict(dataset, net, cuda=cuda, progress_bar=progress_bar)
+    assert expected_predictions.keys() == actual_predictions.keys()
+    assert expected_predictions == actual_predictions
+
 if __name__ == '__main__':
     test_train()
     test_train(cuda=True)
@@ -326,3 +371,6 @@ if __name__ == '__main__':
     test_evaluate_and_get_error_samples()
     test_evaluate_and_get_error_samples(cuda=True)
     test_evaluate_and_get_error_samples(progress_bar=True)
+    test_predict()
+    test_predict(cuda=True)
+    test_predict(progress_bar=True)
