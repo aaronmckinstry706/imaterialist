@@ -546,3 +546,29 @@ After doing 5-crop averaging, the score was only increased to 86.5%, an increase
 It is too late to train another model, I think, as the submission is due Wednesday--though that would probably increase the accuracy even further. It is also too late to attempt some sort of crazy method I've never tried before. All this being said, the best option is to write the test output functions and make my final submission (with approximately 13.5% error; not bad, considering the difficulty of the problem!). 
 
 I will plan this in the morning, and execute this in the afternoon. 
+
+## May 28, 2018
+
+It's almost 4pm--but whatever, let's plan!
+
+How do I make the output function? Two parts: a custom dataset iterator, and a--
+
+--I can't do this. Too tired. Tomorrow. 
+
+## May 29, 2018
+
+Now I can do this. I need a custom `Dataset` that loads an `(image, id)` tuple (here, `id` is a number), and a custom function to pass as the `collate_fn` to the `DataLoader` constructor. I also need a custom `get_predictions(model, dataset, ...)` function that returns a dictionary from the id to the prediction class. This will allow me to actually get a prediction. Note that I will have to output `prediction_class_index + 1`, since the actual class labels are `1` to `128`, while the indexes are `0` to `127`. 
+
+Once I have the predictions, I'll be able to properly output them in whatever format I want with relative ease. For now, I need to write those classes. 
+
+Built and tested the `Dataset` subclass, which I call `TestDataset`. Now I need to write the `collate_fn`. 
+
+UGH. What about the _transforms_? Simple solution: include the transform in the `TestDataset.__getitem__` function, like in `ImageFolder` class. Included the transform in `__getitem__`, and wrote/tested `collate_fn(...)`. This should all work quite nicely with `DataLoader` class. 
+
+Now I need to write the evaluation function, which maps files to predictions and returns the resulting dictionary. Then I can add code to the `evaluate(...)` function that simply outputs the results to a text file `test_predictions`, in some format or other. Added/tested `predict(...)`. 
+
+The final task is to add the output code to the `evaluate` subcommand code in the main module. Before I do this, I need to know: what's the output format for the Kaggle competition? A csv file, with an `id,predicted` header row and columns in the same format (no quotes, numbers only). Now I'll add an option for generating predictions in an output file. 
+
+I did it! And I had to fill in missing test images with random predictions. I also had to correct an index issue (pytorch's `ImageFolder` class maps numeric indices to the lexical ordering of the file names `1`, `11`, ..., `110`, `111`, ..., `128`, `2`, `20`, ..., etc.; I had to do the backwards mapping of these indices from the predicted indices. It worked!
+
+In the end, I placed 74th on the public leaderboard (at the time of this writing: 4:18 a.m.). I'm happy with the result! 

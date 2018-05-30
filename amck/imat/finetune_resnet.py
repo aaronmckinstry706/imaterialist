@@ -1,13 +1,15 @@
 import argparse
 import collections
+import csv
 import datetime
 import functools
 import itertools
 import logging
+import os.path as path
 import pathlib
 import random
 import sys
-import typing
+from typing import Dict, List
 
 
 import matplotlib.pyplot as pyplot
@@ -28,6 +30,7 @@ import torchvision.utils as utils
 import amck.imat.model_average as model_average
 import amck.imat.ncrop_average as ncrop_average
 import amck.imat.stopwatch as stopwatch
+import amck.imat.test_dataset as test_dataset
 import amck.imat.training as training
 
 
@@ -172,7 +175,7 @@ def evaluate(clargs):
             transforms.Normalize(mean=[0., 0., 0.], std=[1 / 0.2970, 1 / 0.3102, 1 / 0.3271]),
             transforms.Normalize(mean=[-0.6837, -0.6461, -0.6158], std=[1., 1., 1.])])
 
-    def stack_crops_and_normalize(crops: typing.List[torch.Tensor]):
+    def stack_crops_and_normalize(crops: List[torch.Tensor]):
         return torch.stack([normalize(transforms.ToTensor()(crop)) for crop in crops])
 
     image_transform = transforms.Compose([
@@ -181,25 +184,45 @@ def evaluate(clargs):
         transforms.Lambda(stack_crops_and_normalize)
     ])
 
-    validation_data = datasets.ImageFolder('data/validation', transform=image_transform)
-    validation_data_loader = data.DataLoader(validation_data, batch_size=clargs.validation_batch_size,
-                                             num_workers=clargs.num_workers)
+    # validation_data = datasets.ImageFolder('data/validation', transform=image_transform)
+    # validation_data_loader = data.DataLoader(validation_data, batch_size=clargs.validation_batch_size,
+    #                                          num_workers=clargs.num_workers)
+    #
+    # validation_loss_function = functools.partial(functional.nll_loss, size_average=False)
 
-    validation_loss_function = functools.partial(functional.nll_loss, size_average=False)
-
-    loaded_models: typing.List[nn.Module] = []
+    loaded_models: List[nn.Module] = []
     for model_directory in clargs.model_directories:
         current_model = torch.load(str(pathlib.Path(model_directory) / 'model'))
         loaded_models.append(ncrop_average.NCropAverage(current_model))
     network = model_average.ModelAverage(*loaded_models)
     network.cuda()
 
-    validation_loss, validation_accuracy, error_samples = training.evaluate_and_get_error_sample(
-        validation_data_loader, network, validation_loss_function, cuda=True, progress_bar=True)
+    # validation_loss, validation_accuracy, error_samples = training.evaluate_and_get_error_sample(
+    #     validation_data_loader, network, validation_loss_function, cuda=True, progress_bar=True)
+    #
+    # print('validation loss:       {}\n'
+    #       'validation accuracy:   {}'
+    #       .format(validation_loss, validation_accuracy))
 
-    print('validation loss:       {}\n'
-          'validation accuracy:   {}'
-          .format(validation_loss, validation_accuracy))
+    if clargs.predict:
+        testing_data = test_dataset.TestDataset(pathlib.Path('data/testing'), Image.open, image_transform)
+        testing_data_loader = data.DataLoader(testing_data, batch_size=clargs.validation_batch_size,
+                                              num_workers=clargs.num_workers, collate_fn=test_dataset.collate_samples)
+
+        prediction_path = pathlib.Path(clargs.predict).absolute()
+        parent_dir: pathlib.Path = prediction_path.parent
+        parent_dir.mkdir(parents=True, exist_ok=True)
+        predictions: Dict[pathlib.Path, int] = training.predict(
+            testing_data_loader, network, cuda=True, progress_bar=True)
+
+        with prediction_path.open('w') as prediction_file:
+            csv_writer = csv.writer(prediction_file, quoting=csv.QUOTE_MINIMAL)
+            rows = [['id', 'predicted']]
+            for p, c in predictions.items():
+                id, _ = path.splitext(p.name)
+                rows.append([id, c])
+            csv_writer.writerows(rows)
+
 
     # TODO: fix this section to handle the ncrop-averaging modification.
     # # Visualize the distribution of errors over each class.
@@ -234,7 +257,7 @@ def evaluate(clargs):
     # pyplot.show()
 
 
-def get_args(raw_args: typing.List[str]):
+def get_args(raw_args: List[str]):
     arg_parser = argparse.ArgumentParser(
         description='Trains Resnet from the PyTorch models on the iMaterialist training data, and evaluates trained '
                     'resnet models on iMaterialist validation data.')
@@ -279,6 +302,11 @@ def get_args(raw_args: typing.List[str]):
                                             help='directories containing models to be averaged and evaluated.')
     evaluate_subcommand_parser.add_argument('--validation-batch-size', '-a', type=int, default=2,
                                             help='Validation batch size.')
+    evaluate_subcommand_parser.add_argument('--predict', '-p', nargs='?', const='predictions.csv', default=False,
+                                            help='If excluded, no predictions will be generated. If included, then it'
+                                                 'can include a file path argument indicating the file location of '
+                                                 'the output. If --predict is included, but no file path is given, '
+                                                 'then the output will be "predictions.csv" in the CWD.')
     evaluate_subcommand_parser.set_defaults(evaluate=True)
 
     parsed_args = arg_parser.parse_args(args=raw_args)

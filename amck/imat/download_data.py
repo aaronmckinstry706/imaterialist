@@ -39,7 +39,7 @@ arg_parser.add_argument(
 arg_parser.add_argument(
     '--verbose', '-v', action='count', help='Print additional output messages. Can be passed multiple times. Once '
                                             'prints additional status information, and two or more times prints '
-                                            'debugging information.')
+                                            'debugging information.', default=0)
 arg_parser.add_argument(
     '--limit', '-l', type=int, default=sys.maxsize, help='Maximum number of files to download before stopping.')
 arg_parser.add_argument(
